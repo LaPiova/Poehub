@@ -58,7 +58,6 @@ class PoeHub(red_commands.Cog):
         
         default_user = {
             "model": "Claude-3.5-Sonnet",
-            "private_mode": False,
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
             "system_prompt": None  # User's custom system prompt (overrides default)
@@ -342,7 +341,6 @@ class PoeHub(red_commands.Cog):
         
         # Get user's preferences
         user_model = await self.config.user(ctx.author).model()
-        private_mode = await self.config.user(ctx.author).private_mode()
         active_conv_id = await self._get_active_conversation_id(ctx.author.id)
         
         # Load conversation history
@@ -373,18 +371,8 @@ class PoeHub(red_commands.Cog):
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
         
-        # Determine where to send response
-        target_channel = None
-        if private_mode and not isinstance(ctx.channel, discord.DMChannel):
-            try:
-                target_channel = await ctx.author.create_dm()
-                await ctx.send("📬 Response sent to your DMs!")
-            except:
-                await ctx.send("❌ Unable to send DM. Please check your privacy settings.")
-                return
-        
         # Stream the response
-        await self._stream_response(ctx, messages, user_model, target_channel, 
+        await self._stream_response(ctx, messages, user_model, None, 
                                     save_to_conv=(ctx.author.id, active_conv_id))
     
     @red_commands.command(name="setmodel")
@@ -455,18 +443,6 @@ class PoeHub(red_commands.Cog):
         await self.config.user(ctx.author).system_prompt.set(None)
         await ctx.send("✅ Your personal prompt has been cleared.")
     
-    @red_commands.command(name="privatemode")
-    async def toggle_private_mode(self, ctx: red_commands.Context):
-        """Toggle private mode (receive responses via DM)"""
-        current_mode = await self.config.user(ctx.author).private_mode()
-        new_mode = not current_mode
-        await self.config.user(ctx.author).private_mode.set(new_mode)
-        
-        if new_mode:
-            await ctx.send("🔒 Private mode **enabled**.")
-        else:
-            await ctx.send("🔓 Private mode **disabled**.")
-    
     @red_commands.command(name="purge_my_data")
     async def purge_user_data(self, ctx: red_commands.Context):
         """Delete all your stored data from the bot"""
@@ -485,6 +461,49 @@ class PoeHub(red_commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("❌ Confirmation timeout.")
     
+    @red_commands.command(name="clear_history", aliases=["clear_context", "reset_conv"])
+    async def clear_history(self, ctx: red_commands.Context):
+        """Clear the history of the current conversation"""
+        if not self.conversation_manager:
+            await ctx.send("❌ System not initialized.")
+            return
+
+        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
+        conv = await self._get_conversation(ctx.author.id, active_conv_id)
+        
+        if conv is None:
+            await ctx.send("⚠️ No active conversation to clear.")
+            return
+
+        # Use manager to clear messages
+        updated_conv = self.conversation_manager.clear_messages(conv)
+        await self._save_conversation(ctx.author.id, active_conv_id, updated_conv)
+        
+        await ctx.send(f"✅ Conversation history cleared for **{updated_conv.get('title', active_conv_id)}**.")
+
+    @red_commands.command(name="delete_all_conversations", aliases=["delallconvs", "reset_all"])
+    async def delete_all_conversations(self, ctx: red_commands.Context):
+        """Delete ALL your conversations"""
+        confirm_msg = await ctx.send(
+            "⚠️ This will delete **ALL** your conversations history. This cannot be undone.\nReact with ✅ to confirm."
+        )
+        await confirm_msg.add_reaction("✅")
+        
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) == "✅" and reaction.message.id == confirm_msg.id
+        
+        try:
+            await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
+            
+            # Reset conversations
+            await self.config.user(ctx.author).conversations.set({})
+            # Reset active conversation pointer
+            await self.config.user(ctx.author).active_conversation.set("default")
+            
+            await ctx.send("✅ All conversations have been deleted.")
+        except asyncio.TimeoutError:
+            await ctx.send("❌ Confirmation timeout.")
+
     @red_commands.command(name="newconv")
     async def new_conversation(self, ctx: red_commands.Context, *, title: str = None):
         """Create a new conversation"""
@@ -632,7 +651,7 @@ class PoeHub(red_commands.Cog):
                 color=discord.Color.blue()
             )
             
-            # Grouping logic (simplified locally or could be moved to helper, keeping simple here)
+            # Grouping logic
             groups = {"Claude": [], "GPT": [], "Other": []}
             for m in models:
                 mid = m['id'].lower()
@@ -641,10 +660,41 @@ class PoeHub(red_commands.Cog):
                 else: groups["Other"].append(m['id'])
             
             for cat, m_list in groups.items():
-                if m_list:
-                    val = "\n".join([f"`{m}`" for m in m_list[:15]])
-                    if len(m_list) > 15: val += f"\n*...and {len(m_list)-15} more*"
-                    embed.add_field(name=cat, value=val, inline=False)
+                if not m_list:
+                    continue
+                
+                # Sort alphabetically
+                m_list.sort()
+                
+                # Chunking logic for Discord embed field limit (1024 chars)
+                current_chunk = []
+                current_len = 0
+                part = 1
+                
+                for i, m in enumerate(m_list):
+                    entry = f"`{m}`"
+                    # Check if adding this entry + newline would exceed safe limit (1000 chars)
+                    # or if we are at the last element
+                    if current_len + len(entry) + 1 > 1000:
+                        # Flush current chunk
+                        val = "\n".join(current_chunk)
+                        name = f"{cat} (Part {part})" if (len(m_list) > len(current_chunk) or part > 1) else cat
+                        embed.add_field(name=name, value=val, inline=False)
+                        
+                        # Start new chunk
+                        current_chunk = [entry]
+                        current_len = len(entry)
+                        part += 1
+                    else:
+                        current_chunk.append(entry)
+                        current_len += len(entry) + 1 # +1 for newline
+
+                # Flush remaining
+                if current_chunk:
+                    val = "\n".join(current_chunk)
+                    # Adjust name for the last part
+                    name = f"{cat} (Part {part})" if part > 1 else cat
+                    embed.add_field(name=name, value=val, inline=False)
             
             embed.set_footer(text=f"Cached {self.client.get_cache_age()}s ago")
             await status_msg.edit(content=None, embed=embed)
@@ -757,8 +807,8 @@ class PoeHub(red_commands.Cog):
             color=discord.Color.blue()
         )
         embed.add_field(name="📝 Basic Commands 基本指令", value="**!ask**, **!setmodel**, **!mymodel**, **!listmodels**, **!searchmodels**", inline=False)
-        embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**", inline=False)
-        embed.add_field(name="⚙️ Settings 設定", value="**!setprompt**, **!privatemode**, **!purge_my_data**", inline=False)
+        embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**, **!clear_history**, **!delete_all_conversations**", inline=False)
+        embed.add_field(name="⚙️ Settings 設定", value="**!setprompt**, **!purge_my_data**", inline=False)
         await ctx.send(embed=embed)
 
 

@@ -83,6 +83,14 @@ class ConversationManager:
             
         return conversation
 
+    def clear_messages(self, conversation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Clears all messages from the conversation.
+        Returns the updated conversation object.
+        """
+        conversation["messages"] = []
+        return conversation
+
     def get_api_messages(self, conversation: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Extracts messages formatted specifically for the OpenAI/Poe API.

@@ -72,7 +72,9 @@ This displays a beautiful embed with all commands organized by category in both 
 | `!switchconv <id>` | Switch conversations | 切換對話 |
 | `!listconv` | List all conversations | 列出所有對話 |
 | `!currentconv` | Show active conversation | 顯示當前對話 |
+| `!clear_history` | Clear active conversation history | 清除當前對話紀錄 |
 | `!deleteconv <id>` | Delete conversation | 刪除對話 |
+| `!delete_all_conversations` | Delete ALL conversations | 刪除所有對話 |
 
 ### Settings & Prompts 設定與提示詞
 
@@ -81,7 +83,6 @@ This displays a beautiful embed with all commands organized by category in both 
 | `!setprompt <text>` | Set personal system prompt | 設定個人系統提示詞 |
 | `!myprompt` | View current system prompt | 查看當前系統提示詞 |
 | `!clearprompt` | Clear personal prompt | 清除個人提示詞 |
-| `!privatemode` | Toggle private mode | 切換私密模式 |
 | `!purge_my_data` | Delete all your data | 刪除所有資料 |
 
 ---
@@ -286,7 +287,7 @@ Planned features 計劃功能:
 
 ---
 
-**Version 版本:** 1.1.0  
-**Last Updated 最後更新:** December 22, 2025  
+**Version 版本:** 1.2.0  
+**Last Updated 最後更新:** December 23, 2025  
 **Languages 語言:** English 英文, Traditional Chinese 繁體中文
 

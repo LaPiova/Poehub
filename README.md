@@ -9,7 +9,6 @@ A comprehensive Red-DiscordBot Cog that integrates with Poe's AI platform using 
 - 📝 **System Prompts**: Owner can set default prompt, users can set personal prompts (fully isolated per user)
 - 🔒 **Encrypted Data Storage**: All local data encrypted using Fernet encryption
 - 🖼️ **Image Support**: Send images with your queries using OpenAI Vision format
-- 📬 **Private Mode**: Toggle DM responses for privacy
 - 💬 **DM Support**: Chat with the bot directly via Discord DMs
 - 🧹 **Data Purging**: Users can delete their data anytime
 - 🌊 **Streaming Responses**: Real-time response streaming with 2-second update intervals
@@ -125,12 +124,6 @@ Force refresh the model list:
 [p]searchmodels llama
 ```
 
-#### Toggle Private Mode
-```
-[p]privatemode
-```
-When enabled, responses will be sent to your DMs even when asking in a server channel.
-
 #### Set System Prompt
 ```
 [p]setprompt You are a helpful coding assistant. Always provide examples.
@@ -167,11 +160,23 @@ Switch to a different conversation by ID.
 ```
 View all your saved conversations.
 
+#### Clear Conversation History
+```
+[p]clear_history
+```
+Clear all messages in the current conversation while keeping the conversation itself.
+
 #### Delete Conversation
 ```
 [p]deleteconv conv_1734851234
 ```
 Permanently delete a conversation.
+
+#### Delete All Conversations
+```
+[p]delete_all_conversations
+```
+Delete ALL your conversation history. This cannot be undone.
 
 #### Purge Your Data
 ```
@@ -229,7 +234,6 @@ The bot uses the OpenAI-compatible endpoint at `https://api.poe.com/v1`
 - **Encryption**: All local data is encrypted using `cryptography.fernet`
 - **API Key Protection**: The bot automatically deletes messages containing API keys
 - **User Privacy**: Users control their data and can purge it anytime
-- **Private Mode**: Option to receive responses via DM for enhanced privacy
 
 ## File Structure
 

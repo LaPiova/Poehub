@@ -10,7 +10,7 @@ PoeHub now supports **persistent conversation context**! Each user has their own
 - **Persistent Context**: The AI remembers previous messages in each conversation
 - **Per-User Storage**: Each Discord user has their own isolated conversations
 - **Encrypted Storage**: All conversation data is encrypted using Fernet
-- **Easy Management**: Simple commands to create, switch, list, and delete conversations
+- **Easy Management**: Simple commands to create, switch, list, clear, and delete conversations
 
 ---
 
@@ -60,6 +60,15 @@ Switch to a different conversation to continue where you left off.
 !switchconv conv_1703251234       # Switch to that conversation
 ```
 
+### Clear Conversation History
+```
+!clear_history
+```
+Clears all messages from the current conversation but keeps the conversation itself active.
+Useful when you want to restart a topic without creating a new conversation ID.
+
+**Aliases:** `!clear_context`, `!reset_conv`
+
 ### Delete Conversation
 ```
 !deleteconv <conversation_id>
@@ -67,6 +76,14 @@ Switch to a different conversation to continue where you left off.
 Permanently delete a conversation (requires confirmation).
 
 **Note:** You cannot delete your active conversation. Switch to another one first.
+
+### Delete All Conversations
+```
+!delete_all_conversations
+```
+Permanently deletes ALL your conversation history. This cannot be undone.
+
+**Aliases:** `!delallconvs`, `!reset_all`
 
 ---
 
@@ -174,6 +191,11 @@ If you want to start fresh within a topic:
 !newconv Python Help - Part 2
 # Fresh context but you can reference old conv ID
 ```
+Or simply use:
+```
+!clear_history
+# Keeps the same conversation ID but wipes the messages
+```
 
 ---
 
@@ -195,7 +217,12 @@ Delete a specific conversation:
 !deleteconv conv_1703251234
 ```
 
-Delete ALL your data (including all conversations):
+Delete all conversations:
+```
+!delete_all_conversations
+```
+
+Delete ALL your data (including preferences):
 ```
 !purge_my_data
 ```
@@ -263,8 +290,9 @@ Delete old conversations you no longer need:
 ```
 
 ### Context Reset Within Conversation
-If you want to change direction but keep the conversation:
+If you want to change direction but keep the conversation ID:
 ```
+!clear_history
 !ask Let's start a new subtopic: [your question]
 ```
 
@@ -367,12 +395,14 @@ After upgrade, organize your conversations:
 | `!newconv` | Create conversation | `!newconv Python Help` |
 | `!listconv` | List all conversations | `!listconv` |
 | `!switchconv` | Switch conversation | `!switchconv conv_123` |
+| `!clear_history` | Clear messages in current conv | `!clear_history` |
 | `!deleteconv` | Delete conversation | `!deleteconv conv_123` |
+| `!delete_all_conversations` | Delete ALL conversations | `!delete_all_conversations` |
 | `!currentconv` | Show active conversation | `!currentconv` |
 
 ---
 
-**Version:** 1.1.0  
-**Last Updated:** December 22, 2025  
-**Feature:** Persistent Conversation Context
+**Version:** 1.2.0  
+**Last Updated:** December 23, 2025  
+**Feature:** Persistent Conversation Context & Management
 
