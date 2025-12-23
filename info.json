@@ -1,0 +1,15 @@
+{
+    "author": ["PoeHub Team"],
+    "name": "PoeHub",
+    "description": "A Red-DiscordBot Cog that connects to the Poe API using OpenAI-compatible endpoints. Supports multi-model switching, encrypted local data, image attachments, and private mode.",
+    "short": "Poe API integration for Red-DiscordBot",
+    "install_msg": "Thank you for installing PoeHub! Use [p]load poehub to load the cog, then set your API key with [p]poeapikey <your_key>. For help, use [p]help PoeHub.",
+    "tags": ["poe", "api", "ai", "chatbot", "openai"],
+    "requirements": ["openai", "cryptography"],
+    "min_bot_version": "3.5.0",
+    "hidden": false,
+    "disabled": false,
+    "type": "COG",
+    "end_user_data_statement": "This cog stores user preferences (model selection, private mode) and optionally conversation history. All data is encrypted using Fernet encryption. Users can purge their data anytime with [p]purge_my_data."
+}
+
