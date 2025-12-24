@@ -357,11 +357,12 @@ class PoeHub(red_commands.Cog):
         if image_urls:
             content = self.client.format_image_message(query, image_urls)
             new_message = {"role": "user", "content": content}
+            # Save structured content with images to conversation history
+            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", content)
         else:
             new_message = {"role": "user", "content": query}
-        
-        # Add to conversation history
-        await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", query)
+            # Save text-only content to conversation history
+            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", query)
         
         # Combine history with new message
         messages = history + [new_message]
@@ -756,10 +757,12 @@ class PoeHub(red_commands.Cog):
             if image_urls:
                 content = self.client.format_image_message(message.content, image_urls)
                 new_msg = {"role": "user", "content": content}
+                # Save structured content with images to conversation history
+                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", content)
             else:
                 new_msg = {"role": "user", "content": message.content}
-            
-            await self._add_message_to_conversation(message.author.id, active_conv_id, "user", message.content)
+                # Save text-only content to conversation history
+                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", message.content)
             messages = history + [new_msg]
             
             system_prompt = await self._get_system_prompt(message.author.id)

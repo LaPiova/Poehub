@@ -1,6 +1,6 @@
 import time
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
 try:
     from .encryption import EncryptionHelper
@@ -61,11 +61,12 @@ class ConversationManager:
         self, 
         conversation: Dict[str, Any], 
         role: str, 
-        content: str,
+        content: Union[str, List[Dict[str, Any]]],  # Can be str or List[Dict] for images
         max_history: int = 50
     ) -> Dict[str, Any]:
         """
         Adds a message to the conversation and maintains the history limit.
+        Content can be a string or a structured content array (for images).
         Returns the updated conversation object.
         """
         if "messages" not in conversation:
