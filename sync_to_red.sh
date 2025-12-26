@@ -5,10 +5,14 @@
 # Run this after making changes to sync them to the bot
 ###############################################################################
 
-SOURCE_DIR="$HOME/Poehub"
+SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TARGET_DIR="$HOME/red-cogs/poehub"
 
+set -euo pipefail
+
 echo "🔄 Syncing PoeHub files..."
+echo "Source: $SOURCE_DIR"
+echo "Target: $TARGET_DIR"
 echo ""
 
 # Create target directory if it doesn't exist
@@ -27,7 +31,7 @@ echo ""
 echo "✅ Files synced successfully!"
 echo ""
 echo "Files in $TARGET_DIR:"
-ls -lh "$TARGET_DIR"/*.py "$TARGET_DIR"/*.json 2>/dev/null
+ls -lh "$TARGET_DIR"/*.py "$TARGET_DIR"/*.json 2>/dev/null || true
 echo ""
 echo "📝 Next steps in Discord:"
 echo ""

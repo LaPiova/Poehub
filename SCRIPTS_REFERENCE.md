@@ -128,7 +128,11 @@ python ~/Poehub/verify_installation.py
 
 ### Full Deployment
 ```bash
+# Ubuntu / Debian
 ~/Poehub/deploy_poe_bot.sh
+
+# Arch Linux
+~/Poehub/deploy_poe_bot_on_arch.sh
 ```
 **Use when:**
 - Fresh server setup
@@ -149,6 +153,7 @@ python ~/Poehub/verify_installation.py
 ### First Time Setup
 ```bash
 # 1. Deploy everything
+# (Use deploy_poe_bot_on_arch.sh on Arch)
 ~/Poehub/deploy_poe_bot.sh
 
 # 2. Start bot (interactive to see if it works)
@@ -229,7 +234,8 @@ screen -r poebot
 | `GET_PATH.sh` | Show path command | Need absolute path |
 | `fix_python_version.sh` | Fix Python issues | Installation errors |
 | `verify_installation.py` | Check dependencies | Troubleshooting |
-| `deploy_poe_bot.sh` | Full deployment | Fresh install |
+| `deploy_poe_bot.sh` | Full deployment (Ubuntu/Debian) | Fresh install |
+| `deploy_poe_bot_on_arch.sh` | Full deployment (Arch) | Fresh install on Arch |
 
 ---
 
