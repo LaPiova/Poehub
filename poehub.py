@@ -9,6 +9,7 @@ from redbot.core import commands as red_commands, Config
 from redbot.core.bot import Red
 import asyncio
 import logging
+import os
 from typing import Optional, List, Dict, Any, Union, Set
 import time
 
@@ -21,6 +22,15 @@ except ImportError:
     from encryption import EncryptionHelper, generate_key
     from api_client import PoeClient, DummyPoeClient
     from conversation_manager import ConversationManager
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    """Return True if the env var is set to a truthy value."""
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+ALLOW_DUMMY_MODE = _env_flag("POEHUB_ENABLE_DUMMY_MODE", "0")
 
 
 log = logging.getLogger("red.poehub")
@@ -47,6 +57,7 @@ class PoeHub(red_commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890, force_registration=True)
+        self.allow_dummy_mode = ALLOW_DUMMY_MODE
         
         # Default configuration
         default_global = {
@@ -99,6 +110,11 @@ class PoeHub(red_commands.Cog):
         """Initialize the Poe client"""
         self.client = None
         use_dummy = await self.config.use_dummy_api()
+        if use_dummy and not self.allow_dummy_mode:
+            # Ensure persisted config stays in sync with release builds
+            await self.config.use_dummy_api.set(False)
+            log.info("Dummy API mode is disabled in this release build; falling back to live client.")
+            use_dummy = False
         if use_dummy:
             self.client = DummyPoeClient()
             log.info("Dummy PoeHub client initialized (offline mode)")
@@ -111,7 +127,12 @@ class PoeHub(red_commands.Cog):
             self.client = PoeClient(api_key=api_key, base_url=base_url)
             log.info("PoeHub API client initialized")
         else:
-            log.warning("No API key set. Use [p]poeapikey to set one or enable dummy mode.")
+            warning = "No API key set. Use [p]poeapikey to set one"
+            if self.allow_dummy_mode:
+                warning += " or enable dummy mode."
+            else:
+                warning += "."
+            log.warning(warning)
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
         """
@@ -215,14 +236,19 @@ class PoeHub(red_commands.Cog):
         dummy_state: bool
     ) -> discord.Embed:
         """Create the status embed for the interactive config menu"""
+        description = (
+            "Use the dropdown to choose your default model, set or clear your personal system prompt, "
+            "and close the menu when you're done.\n\n"
+            "Prefer commands? You can still use `[p]setmodel`, `[p]setprompt`, `[p]clearprompt`"
+        )
+        if owner_mode and self.allow_dummy_mode:
+            description += ", and `[p]poedummymode` (owner only)."
+        else:
+            description += "."
+
         embed = discord.Embed(
             title="⚙️ PoeHub Configuration",
-            description=(
-                "Use the dropdown to choose your default model, set or clear your personal system prompt, "
-                "and close the menu when you're done.\n\n"
-                "Prefer commands? You can still use `[p]setmodel`, `[p]setprompt`, `[p]clearprompt`, "
-                "and `[p]poedummymode` (owner only)."
-            ),
+            description=description,
             color=discord.Color.blurple()
         )
         current_model = await self.config.user(ctx.author).model()
@@ -235,7 +261,7 @@ class PoeHub(red_commands.Cog):
             inline=True
         )
 
-        if owner_mode:
+        if owner_mode and self.allow_dummy_mode:
             status_text = "ON" if dummy_state else "OFF"
             embed.add_field(
                 name="Dummy API Mode",
@@ -414,6 +440,9 @@ class PoeHub(red_commands.Cog):
     @red_commands.is_owner()
     async def toggle_dummy_mode(self, ctx: red_commands.Context, *, state: Optional[str] = None):
         """Enable/disable offline dummy API mode or show its status"""
+        if not self.allow_dummy_mode:
+            await ctx.send("❌ Dummy API mode is disabled in this release build.")
+            return
         if state is None:
             enabled = await self.config.use_dummy_api()
             status_text = "ON" if enabled else "OFF"
@@ -442,7 +471,7 @@ class PoeHub(red_commands.Cog):
         """Open the interactive configuration panel"""
         model_options = await self._build_model_select_options()
         is_owner = await self.bot.is_owner(ctx.author)
-        dummy_state = await self.config.use_dummy_api() if is_owner else False
+        dummy_state = await self.config.use_dummy_api() if (is_owner and self.allow_dummy_mode) else False
 
         embed = await self._build_config_embed(ctx, is_owner, dummy_state)
 
@@ -939,11 +968,10 @@ class PoeHub(red_commands.Cog):
         )
         embed.add_field(name="📝 Basic Commands 基本指令", value="**!ask**, **!setmodel**, **!mymodel**, **!listmodels**, **!searchmodels**", inline=False)
         embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**, **!clear_history**, **!delete_all_conversations**", inline=False)
-        embed.add_field(
-            name="⚙️ Settings 設定",
-            value="**!poeconfig**, **!setprompt**, **!clearprompt**, **!purge_my_data**, **!poedummymode** (擁有者)",
-            inline=False
-        )
+        settings_value = "**!poeconfig**, **!setprompt**, **!clearprompt**, **!purge_my_data**"
+        if self.allow_dummy_mode:
+            settings_value += ", **!poedummymode** (擁有者)"
+        embed.add_field(name="⚙️ Settings 設定", value=settings_value, inline=False)
         await ctx.send(embed=embed)
 
 
@@ -971,7 +999,7 @@ class PoeConfigView(discord.ui.View):
         self.add_item(ShowPromptButton(cog, ctx))
         self.add_item(ClearPromptButton(cog, ctx))
 
-        if owner_mode:
+        if owner_mode and cog.allow_dummy_mode:
             self.add_item(DummyToggleButton(cog, ctx, dummy_state))
 
         self.add_item(CloseMenuButton())

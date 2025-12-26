@@ -85,7 +85,10 @@ This displays a beautiful embed with all commands organized by category in both 
 | `!myprompt` | View current system prompt | 查看當前系統提示詞 |
 | `!clearprompt` | Clear personal prompt | 清除個人提示詞 |
 | `!purge_my_data` | Delete all your data | 刪除所有資料 |
-| `!poedummymode <on/off>` | Toggle dummy API mode (owner only) | 切換 Dummy API 模式（僅擁有者） |
+| `!poedummymode <on/off>` | Toggle dummy API mode (owner only, if enabled) | 切換 Dummy API 模式（僅擁有者，需啟用） |
+
+> `!poedummymode` only shows up when `POEHUB_ENABLE_DUMMY_MODE=1` (default is `0`). Flip it to `1` for local debugging and back to `0` before release.
+> 當 `POEHUB_ENABLE_DUMMY_MODE=1` (預設為 `0`) 時才會顯示 `!poedummymode`，開發時設成 `1`，正式環境再改回 `0`。
 
 ---
 
