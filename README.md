@@ -97,6 +97,12 @@ Once the bot is running, configure it in Discord:
 [p]poeapikey <your_poe_api_key>
 ```
 
+4. **Open the interactive config panel**:
+```
+[p]poeconfig
+```
+Use the dropdown + buttons to change your default model, set/clear personal prompts, or (if you're the owner) toggle dummy mode without memorizing every text command.
+
 ## Offline Dummy Mode (No Poe API Key)
 
 Need to debug commands before you have a real Poe API key? Enable the dummy client:
