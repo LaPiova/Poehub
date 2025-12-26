@@ -80,6 +80,7 @@ This displays a beautiful embed with all commands organized by category in both 
 
 | Command 指令 | English | 繁體中文 |
 |--------------|---------|----------|
+| `!poeconfig` | Open interactive config menu | 開啟互動式設定面板 |
 | `!setprompt <text>` | Set personal system prompt | 設定個人系統提示詞 |
 | `!myprompt` | View current system prompt | 查看當前系統提示詞 |
 | `!clearprompt` | Clear personal prompt | 清除個人提示詞 |
