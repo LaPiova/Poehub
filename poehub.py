@@ -9,17 +9,17 @@ from redbot.core import commands as red_commands, Config
 from redbot.core.bot import Red
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 import time
 
 # Handle imports
 try:
     from .encryption import EncryptionHelper, generate_key
-    from .api_client import PoeClient
+    from .api_client import PoeClient, DummyPoeClient
     from .conversation_manager import ConversationManager
 except ImportError:
     from encryption import EncryptionHelper, generate_key
-    from api_client import PoeClient
+    from api_client import PoeClient, DummyPoeClient
     from conversation_manager import ConversationManager
 
 
@@ -53,7 +53,8 @@ class PoeHub(red_commands.Cog):
             "api_key": None,
             "encryption_key": None,
             "base_url": "https://api.poe.com/v1",
-            "default_system_prompt": None  # Default system prompt set by bot owner
+            "default_system_prompt": None,  # Default system prompt set by bot owner
+            "use_dummy_api": False  # Allow offline debugging without Poe API key
         }
         
         default_user = {
@@ -66,7 +67,7 @@ class PoeHub(red_commands.Cog):
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
         
-        self.client: Optional[PoeClient] = None
+        self.client: Optional[Union[PoeClient, DummyPoeClient]] = None
         self.conversation_manager: Optional[ConversationManager] = None
         self.encryption: Optional[EncryptionHelper] = None
         
@@ -96,6 +97,13 @@ class PoeHub(red_commands.Cog):
     
     async def _init_client(self):
         """Initialize the Poe client"""
+        self.client = None
+        use_dummy = await self.config.use_dummy_api()
+        if use_dummy:
+            self.client = DummyPoeClient()
+            log.info("Dummy PoeHub client initialized (offline mode)")
+            return
+
         api_key = await self.config.api_key()
         base_url = await self.config.base_url()
         
@@ -103,7 +111,7 @@ class PoeHub(red_commands.Cog):
             self.client = PoeClient(api_key=api_key, base_url=base_url)
             log.info("PoeHub API client initialized")
         else:
-            log.warning("No API key set. Use [p]poeapikey to set one.")
+            log.warning("No API key set. Use [p]poeapikey to set one or enable dummy mode.")
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
         """
@@ -328,6 +336,33 @@ class PoeHub(red_commands.Cog):
             pass
         
         await ctx.send("✅ API key has been set successfully! (Your message was deleted for security)")
+
+    @red_commands.command(name="poedummymode")
+    @red_commands.is_owner()
+    async def toggle_dummy_mode(self, ctx: red_commands.Context, *, state: Optional[str] = None):
+        """Enable/disable offline dummy API mode or show its status"""
+        if state is None:
+            enabled = await self.config.use_dummy_api()
+            status_text = "ON" if enabled else "OFF"
+            await ctx.send(f"🔧 Dummy API mode is currently **{status_text}**.")
+            return
+
+        normalized = state.strip().lower()
+        if normalized in {"on", "true", "enable", "enabled", "1"}:
+            enabled = True
+        elif normalized in {"off", "false", "disable", "disabled", "0"}:
+            enabled = False
+        else:
+            await ctx.send("❌ Please specify `on` or `off`.")
+            return
+
+        await self.config.use_dummy_api.set(enabled)
+        await self._init_client()
+
+        if enabled:
+            await ctx.send("✅ Dummy API mode enabled. PoeHub will return local stub responses for debugging.")
+        else:
+            await ctx.send("✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`.")
     
     @red_commands.command(name="ask")
     async def ask(self, ctx: red_commands.Context, *, query: str):

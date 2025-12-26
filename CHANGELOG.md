@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Offline dummy mode with `[p]poedummymode` for testing PoeHub without a live Poe API key.
+
 ## [1.3.0] - 2025-12-23
 
 ### Refactored
