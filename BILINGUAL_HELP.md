@@ -84,6 +84,7 @@ This displays a beautiful embed with all commands organized by category in both 
 | `!myprompt` | View current system prompt | 查看當前系統提示詞 |
 | `!clearprompt` | Clear personal prompt | 清除個人提示詞 |
 | `!purge_my_data` | Delete all your data | 刪除所有資料 |
+| `!poedummymode <on/off>` | Toggle dummy API mode (owner only) | 切換 Dummy API 模式（僅擁有者） |
 
 ---
 

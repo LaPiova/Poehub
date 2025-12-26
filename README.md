@@ -97,6 +97,23 @@ Once the bot is running, configure it in Discord:
 [p]poeapikey <your_poe_api_key>
 ```
 
+## Offline Dummy Mode (No Poe API Key)
+
+Need to debug commands before you have a real Poe API key? Enable the dummy client:
+
+```
+[p]poedummymode on
+```
+
+PoeHub will return local stub replies while the rest of the workflow (conversations, prompts, permissions) stays identical. Switch back to the live Poe API when you're ready:
+
+```
+[p]poedummymode off
+[p]poeapikey YOUR_REAL_KEY
+```
+
+Use this workflow to validate deployments, Discord permissions, and data storage without touching the live Poe service.
+
 ## Usage
 
 ### Basic Commands
@@ -208,6 +225,13 @@ Sets a default prompt that all users will use unless they set their own.
 [p]cleardefaultprompt
 ```
 Removes the default system prompt.
+
+#### Toggle Dummy Mode (Owner Only)
+```
+[p]poedummymode on
+[p]poedummymode off
+```
+Quickly switch between the offline dummy client and the real Poe API.
 
 ### DM Support
 
