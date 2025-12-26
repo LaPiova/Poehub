@@ -15,15 +15,26 @@ A comprehensive Red-DiscordBot Cog that integrates with Poe's AI platform using 
 - 🌐 **Bilingual Help**: Full Traditional Chinese (繁體中文) support
 - 🔄 **Auto-Start**: Optional systemd service for automatic bot start on server reboot
 
+## Before You Start
+
+- ✅ **Discord Bot Token** – create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), invite it to your server, and keep the token ready for `redbot-setup`.
+- 🔑 **Poe API Key** – required for live conversations. For local debugging without a key, enable dummy mode later with `[p]poedummymode on`.
+- 🐍 **Python 3.8.1–3.11** – Red-DiscordBot is incompatible with Python 3.12+. The deployment scripts create a compatible virtualenv automatically.
+- 💻 **Supported OS** – Ubuntu 22.04/24.04 (primary) or Arch Linux. Use the matching deployment script below.
+
 ## Installation
 
 ### Option 1: Automated Deployment (Recommended)
 
-Run the deployment script on a fresh Ubuntu server:
+Run the deployment script on a fresh system:
 
 ```bash
 cd ~/Poehub
+# Ubuntu / Debian-based
 ./deploy_poe_bot.sh
+
+# Arch Linux
+./deploy_poe_bot_on_arch.sh
 ```
 
 **Important:** Red-DiscordBot requires Python 3.8.1 to 3.11.x (NOT 3.12+). 
