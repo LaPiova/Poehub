@@ -23,6 +23,7 @@ from .api_client import get_client, BaseLLMClient
 from .conversation_manager import ConversationManager
 from .encryption import EncryptionHelper, generate_key
 from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
+from .prompt_utils import prompt_to_file
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
 from .ui.language_view import LanguageView
@@ -779,30 +780,63 @@ class PoeHub(red_commands.Cog):
         """View your current system prompt"""
         user_prompt = await self.config.user(ctx.author).system_prompt()
         default_prompt = await self.config.default_system_prompt()
-        
+        lang = await self._get_language(ctx.author.id)
+
         embed = discord.Embed(
-            title="📝 Your System Prompt 您的系統提示詞",
+            title=tr(lang, "MY_PROMPT_EMBED_TITLE"),
             color=discord.Color.blue()
         )
-        
+
+        prompt_files: List[discord.File] = []
+        response_text: Optional[str] = None
+        show_embed = True
+
         if user_prompt:
-            embed.add_field(
-                name="🔷 Personal Prompt 個人提示詞",
-                value=f"```\n{user_prompt[:1000]}{'...' if len(user_prompt) > 1000 else ''}\n```",
-                inline=False
-            )
-            embed.add_field(name="ℹ️ Status 狀態", value="Using your personal prompt", inline=False)
+            if len(user_prompt) > 1000:
+                prompt_files.append(
+                    prompt_to_file(user_prompt, f"personal_prompt_{ctx.author.id}.txt")
+                )
+                response_text = tr(lang, "MY_PROMPT_ATTACHMENT_PERSONAL")
+                show_embed = False
+            else:
+                embed.add_field(
+                    name=tr(lang, "MY_PROMPT_FIELD_PERSONAL"),
+                    value=f"```\n{user_prompt}\n```",
+                    inline=False
+                )
+                embed.add_field(
+                    name=tr(lang, "MY_PROMPT_FIELD_STATUS"),
+                    value=tr(lang, "MY_PROMPT_STATUS_PERSONAL"),
+                    inline=False
+                )
         elif default_prompt:
-            embed.add_field(
-                name="🔹 Default Prompt 預設提示詞",
-                value=f"```\n{default_prompt[:1000]}{'...' if len(default_prompt) > 1000 else ''}\n```",
-                inline=False
-            )
-            embed.add_field(name="ℹ️ Status 狀態", value="Using default prompt", inline=False)
+            if len(default_prompt) > 1000:
+                prompt_files.append(prompt_to_file(default_prompt, "default_prompt.txt"))
+                response_text = tr(lang, "MY_PROMPT_ATTACHMENT_DEFAULT")
+                show_embed = False
+            else:
+                embed.add_field(
+                    name=tr(lang, "MY_PROMPT_FIELD_DEFAULT"),
+                    value=f"```\n{default_prompt}\n```",
+                    inline=False
+                )
+                embed.add_field(
+                    name=tr(lang, "MY_PROMPT_FIELD_STATUS"),
+                    value=tr(lang, "MY_PROMPT_STATUS_DEFAULT"),
+                    inline=False
+                )
         else:
-            embed.description = "No system prompt set"
-        
-        await ctx.send(embed=embed)
+            embed.description = tr(lang, "MY_PROMPT_NONE")
+
+        if prompt_files:
+            await ctx.send(
+                response_text or tr(lang, "MY_PROMPT_ATTACHMENT_GENERIC"),
+                files=prompt_files
+            )
+        elif show_embed:
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(tr(lang, "MY_PROMPT_NONE"))
     
     @red_commands.command(name="clearprompt")
     async def clear_user_prompt(self, ctx: red_commands.Context):
