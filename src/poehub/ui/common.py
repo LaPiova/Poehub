@@ -7,7 +7,13 @@ from typing import Any, Iterable, List, Mapping, Optional
 import discord
 
 
-def preview_content(content: Any, max_len: int = 60) -> str:
+def preview_content(
+    content: Any,
+    max_len: int = 60,
+    *,
+    empty_label: str = "*Empty*",
+    non_text_label: str = "[non-text content]",
+) -> str:
     """Return a short preview string for a stored message content.
 
     PoeHub stores message content as either a plain string or an OpenAI-Vision
@@ -33,21 +39,21 @@ def preview_content(content: Any, max_len: int = 60) -> str:
                     parts.append(value)
         text = " ".join(parts)
         if not text:
-            text = "[non-text content]"
+            text = non_text_label
     else:
         text = str(content) if content is not None else ""
 
     text = text.strip()
     if len(text) > max_len:
         return text[:max_len] + "..."
-    return text or "*Empty*"
+    return text or empty_label
 
 
 class CloseMenuButton(discord.ui.Button):
     """Button to disable and close a view."""
 
-    def __init__(self) -> None:
-        super().__init__(label="Close Menu", style=discord.ButtonStyle.danger)
+    def __init__(self, *, label: str = "Close") -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.danger)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.view

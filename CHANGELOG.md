@@ -43,11 +43,11 @@
 - **Prompt Commands**: `setdefaultprompt`, `cleardefaultprompt`, `setprompt`, `myprompt`, `clearprompt`
 - **Per-User Isolation**: Personal prompts are completely isolated between users
 - **Prompt Priority**: Personal prompts override default prompts
-- **SYSTEM_PROMPTS_GUIDE.md**: Comprehensive bilingual guide for system prompts
+- **SYSTEM_PROMPTS_GUIDE.md**: System prompt guide
 
 ### Changed
 - System prompts now automatically applied to all API calls (`ask` command and DM responses)
-- Updated bilingual help command to include prompt commands
+- Updated help/menu language handling
 - Enhanced security: All prompts stored encrypted per-user
 
 ### Technical Details

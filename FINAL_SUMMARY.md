@@ -22,7 +22,7 @@ All requested features have been implemented, tested, and documented.
 9. ✅ **Conversation context management** - AI remembers up to 50 messages
 10. ✅ **Multiple conversations per user** - separate contexts for different topics
 11. ✅ **Auto-start on server reboot** - systemd service integration
-12. ✅ **Bilingual help system** - Traditional Chinese (繁體中文) support
+12. ✅ **Language selection** - English + Traditional Chinese (繁體中文) support
 
 ---
 
@@ -66,7 +66,7 @@ verify_installation.py         - Dependency checker
 README.md                      - Complete documentation
 QUICKSTART.md                  - 5-minute setup guide
 CONVERSATION_GUIDE.md          - Conversation management
-BILINGUAL_HELP.md              - Chinese/English guide
+BILINGUAL_HELP.md              - Language guide (switch via [p]lang)
 INSTALLATION_CHECKLIST.md      - Setup verification
 SCRIPTS_REFERENCE.md           - All scripts documented
 TROUBLESHOOTING.md             - Problem solving
@@ -98,7 +98,7 @@ CHANGELOG.md                   - Version history
 - `!purge_my_data` - Delete all user data
 
 ### Help (1)
-- `!poehubhelp` (or `!幫助`, `!说明`) - Bilingual help
+- `!poehubhelp` - PoeHub help (localized)
 
 ### Admin (1)
 - `!poeapikey <key>` - Set API key (owner only)
@@ -119,10 +119,9 @@ CHANGELOG.md                   - Version history
 ## 🌐 Language Support
 
 ✅ **English** - Full support
-✅ **Traditional Chinese (繁體中文)** - Full bilingual help
-- All command docstrings bilingual
-- Custom help command with organized Chinese/English reference
-- Chinese aliases: `!幫助`, `!说明`
+✅ **Traditional Chinese (繁體中文)** - Localized menus/help (no mixed bilingual output)
+- Use `!lang` / `!language` to switch language
+- `!config`, `!conv`, and `!poehubhelp` follow your selection
 
 ---
 
@@ -193,7 +192,7 @@ CHANGELOG.md                   - Version history
 - Image attachment support
 - Automatic DM handling
 - Private mode toggle
-- Bilingual help (English/Chinese)
+- Localized menus/help (English or 繁體中文)
 
 ---
 
@@ -263,7 +262,7 @@ CHANGELOG.md                   - Version history
 **Features:**
 - `README.md` - Complete feature reference
 - `CONVERSATION_GUIDE.md` - Conversation management
-- `BILINGUAL_HELP.md` - Chinese/English support
+- `BILINGUAL_HELP.md` - Language selection guide
 
 **Management:**
 - `SCRIPTS_REFERENCE.md` - All helper scripts
@@ -286,7 +285,7 @@ CHANGELOG.md                   - Version history
 ✅ Auto-start on server reboot - Systemd service
 ✅ Conversation context - Multiple conversations per user
 ✅ Switch to previous conversations - Full management system
-✅ Traditional Chinese support - Bilingual help
+✅ Traditional Chinese support - localized menus/help
 ✅ Modular Architecture - Split code into specialized modules
 
 ### Quality Standards
@@ -367,7 +366,7 @@ CHANGELOG.md                   - Version history
 
 1. **Functional** - All features working as requested
 2. **Secure** - Encrypted storage, API key protection
-3. **User-Friendly** - 13 intuitive commands, bilingual help
+3. **User-Friendly** - 13 intuitive commands, localized menus/help
 4. **Maintainable** - Modular code, clean architecture
 5. **Production-Ready** - Auto-start, status monitoring, logging
 6. **Scalable** - Per-user isolation, efficient caching
