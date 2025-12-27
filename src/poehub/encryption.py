@@ -1,21 +1,23 @@
-"""
-Encryption helper for PoeHub Cog
-Uses cryptography.fernet for secure data encryption
+"""Encryption helpers for PoeHub.
+
+Uses Fernet symmetric encryption (via `cryptography`) to encrypt JSON payloads.
 """
 
-from cryptography.fernet import Fernet
+from __future__ import annotations
+
 import base64
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Union
+
+from cryptography.fernet import Fernet
 
 
 class EncryptionHelper:
-    """Helper class for encrypting and decrypting data using Fernet symmetric encryption"""
-    
-    def __init__(self, key: str = None):
-        """
-        Initialize the encryption helper.
-        
+    """Helper for encrypting and decrypting JSON-serializable payloads."""
+
+    def __init__(self, key: Optional[Union[str, bytes]] = None) -> None:
+        """Initialize the encryption helper.
+
         Args:
             key: Base64-encoded Fernet key. If None, generates a new key.
         """
@@ -32,23 +34,17 @@ class EncryptionHelper:
         self.cipher = Fernet(self._key)
     
     def get_key(self) -> str:
-        """
-        Get the encryption key as a string.
-        
-        Returns:
-            str: Base64-encoded encryption key
-        """
+        """Return the encryption key as a base64-encoded string."""
         return self._key.decode()
     
-    def encrypt(self, data: Any) -> str:
-        """
-        Encrypt data. Automatically handles JSON serialization.
-        
+    def encrypt(self, data: Any) -> Optional[str]:
+        """Encrypt data with JSON serialization.
+
         Args:
-            data: Data to encrypt (must be JSON-serializable)
-            
+            data: Data to encrypt (must be JSON-serializable).
+
         Returns:
-            str: Encrypted data as base64 string
+            Base64-encoded encrypted payload, or None if `data` is None.
         """
         if data is None:
             return None
@@ -63,14 +59,13 @@ class EncryptionHelper:
         return base64.b64encode(encrypted).decode()
     
     def decrypt(self, encrypted_data: str) -> Any:
-        """
-        Decrypt data. Automatically handles JSON deserialization.
-        
+        """Decrypt data with JSON deserialization.
+
         Args:
-            encrypted_data: Base64-encoded encrypted data
-            
+            encrypted_data: Base64-encoded encrypted payload.
+
         Returns:
-            Original data (JSON-deserialized)
+            The decrypted JSON value, or None if decryption fails.
         """
         if encrypted_data is None:
             return None
@@ -84,35 +79,18 @@ class EncryptionHelper:
             
             # Parse JSON
             return json.loads(decrypted.decode())
-        except Exception as e:
-            # If decryption fails, return None
+        except Exception:  # noqa: BLE001 - corrupted payloads happen
             return None
     
     def encrypt_dict(self, data_dict: Dict[str, Any]) -> Dict[str, str]:
-        """
-        Encrypt all values in a dictionary.
-        
-        Args:
-            data_dict: Dictionary with values to encrypt
-            
-        Returns:
-            Dictionary with encrypted values
-        """
+        """Encrypt all values in a dictionary."""
         if not data_dict:
             return {}
         
         return {key: self.encrypt(value) for key, value in data_dict.items()}
     
     def decrypt_dict(self, encrypted_dict: Dict[str, str]) -> Dict[str, Any]:
-        """
-        Decrypt all values in a dictionary.
-        
-        Args:
-            encrypted_dict: Dictionary with encrypted values
-            
-        Returns:
-            Dictionary with decrypted values
-        """
+        """Decrypt all values in a dictionary."""
         if not encrypted_dict:
             return {}
         
@@ -120,11 +98,6 @@ class EncryptionHelper:
 
 
 def generate_key() -> str:
-    """
-    Generate a new Fernet encryption key.
-    
-    Returns:
-        str: Base64-encoded encryption key
-    """
+    """Generate a new Fernet encryption key."""
     return Fernet.generate_key().decode()
 

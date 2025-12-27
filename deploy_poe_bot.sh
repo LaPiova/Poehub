@@ -113,11 +113,14 @@ print_success "All packages installed!"
 ###############################################################################
 # Step 4: Run Red-DiscordBot Setup
 ###############################################################################
-print_status "Step 4: Setting up Red-DiscordBot instance 'PoeBot'..."
+INSTANCE_NAME="${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+COGS_DIR="${POEHUB_COGS_DIR:-$HOME/red-cogs}"
+
+print_status "Step 4: Setting up Red-DiscordBot instance '${INSTANCE_NAME}'..."
 
 # Check if instance already exists
-if [ -d "$HOME/.local/share/Red-DiscordBot/data/PoeBot" ]; then
-    print_warning "Instance 'PoeBot' already exists. Skipping setup..."
+if [ -d "$HOME/.local/share/Red-DiscordBot/data/${INSTANCE_NAME}" ]; then
+    print_warning "Instance '${INSTANCE_NAME}' already exists. Skipping setup..."
 else
     print_status "Running redbot-setup..."
     print_warning "You will need to provide your Discord bot token and make some choices."
@@ -135,22 +138,18 @@ fi
 print_status "Step 5: Creating custom cog directory..."
 
 # Create cogs directory
-mkdir -p "$HOME/red-cogs/poehub"
+mkdir -p "$COGS_DIR"
 
 # Copy PoeHub files
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Check if we're in the Poehub directory
-if [ -f "$SCRIPT_DIR/poehub.py" ]; then
-    cp "$SCRIPT_DIR/poehub.py" "$HOME/red-cogs/poehub/"
-    cp "$SCRIPT_DIR/api_client.py" "$HOME/red-cogs/poehub/"
-    cp "$SCRIPT_DIR/conversation_manager.py" "$HOME/red-cogs/poehub/"
-    cp "$SCRIPT_DIR/encryption.py" "$HOME/red-cogs/poehub/"
-    cp "$SCRIPT_DIR/__init__.py" "$HOME/red-cogs/poehub/"
-    cp "$SCRIPT_DIR/info.json" "$HOME/red-cogs/poehub/"
-    print_success "PoeHub cog files copied to ~/red-cogs/poehub/"
+if [ -d "$SCRIPT_DIR/src/poehub" ]; then
+    rm -rf "$COGS_DIR/poehub"
+    cp -R "$SCRIPT_DIR/src/poehub" "$COGS_DIR/poehub"
+    print_success "PoeHub cog package copied to $COGS_DIR/poehub/"
 else
-    print_error "PoeHub files not found! Make sure you're running this from the Poehub directory."
+    print_error "PoeHub files not found! Expected: $SCRIPT_DIR/src/poehub"
     exit 1
 fi
 
@@ -166,8 +165,8 @@ cat > "$HOME/start_bot.sh" << 'EOF'
 source "$HOME/.redenv/bin/activate"
 
 # Start the bot
-echo "Starting PoeBot..."
-redbot PoeBot
+echo "Starting ${POEHUB_REDBOT_INSTANCE:-PoeBot}..."
+redbot "${POEHUB_REDBOT_INSTANCE:-PoeBot}"
 
 # Deactivate venv on exit
 deactivate
@@ -185,7 +184,7 @@ cat > "$HOME/start_bot_screen.sh" << 'EOF'
 #!/bin/bash
 
 # Start bot in a detached screen session
-screen -dmS poebot bash -c "source $HOME/.redenv/bin/activate && redbot PoeBot"
+screen -dmS "${POEHUB_SCREEN_NAME:-poebot}" bash -c "source $HOME/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
 
 echo "Bot started in screen session 'poebot'"
 echo "To attach: screen -r poebot"
@@ -200,16 +199,17 @@ print_success "Screen helper created at ~/start_bot_screen.sh"
 ###############################################################################
 print_status "Step 8: Creating systemd service file..."
 
-cat > "$HOME/poebot.service" << EOF
+SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
+cat > "$HOME/${SERVICE_NAME}.service" << EOF
 [Unit]
-Description=Red-DiscordBot - PoeBot Instance
+Description=Red-DiscordBot - ${INSTANCE_NAME} Instance
 After=network.target
 
 [Service]
 Type=simple
 User=$USER
 WorkingDirectory=$HOME
-ExecStart=$HOME/.redenv/bin/redbot PoeBot
+ExecStart=$HOME/.redenv/bin/redbot ${INSTANCE_NAME}
 Restart=always
 RestartSec=10
 
@@ -217,12 +217,12 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-print_success "Systemd service file created at ~/poebot.service"
+print_success "Systemd service file created at ~/${SERVICE_NAME}.service"
 print_warning "To install the service, run:"
-print_warning "  sudo cp ~/poebot.service /etc/systemd/system/"
+print_warning "  sudo cp ~/${SERVICE_NAME}.service /etc/systemd/system/"
 print_warning "  sudo systemctl daemon-reload"
-print_warning "  sudo systemctl enable poebot.service"
-print_warning "  sudo systemctl start poebot.service"
+print_warning "  sudo systemctl enable ${SERVICE_NAME}.service"
+print_warning "  sudo systemctl start ${SERVICE_NAME}.service"
 
 ###############################################################################
 # Deployment Complete!
@@ -240,7 +240,7 @@ echo "   OR use screen:"
 echo "   ${GREEN}~/start_bot_screen.sh${NC}"
 echo ""
 echo "2. In Discord, add the custom cog repository:"
-echo "   ${YELLOW}[p]addpath ~/red-cogs${NC}"
+echo "   ${YELLOW}[p]addpath $COGS_DIR${NC}"
 echo ""
 echo "3. Load the PoeHub cog:"
 echo "   ${YELLOW}[p]load poehub${NC}"
@@ -258,8 +258,8 @@ echo -e "${GREEN}For more help:${NC}"
 echo "  [p]help PoeHub"
 echo "  [p]listmodels"
 echo ""
-echo -e "${BLUE}Bot Directory:${NC} $HOME/.local/share/Red-DiscordBot/data/PoeBot"
-echo -e "${BLUE}Cog Location:${NC} $HOME/red-cogs/poehub"
+echo -e "${BLUE}Bot Directory:${NC} $HOME/.local/share/Red-DiscordBot/data/${INSTANCE_NAME}"
+echo -e "${BLUE}Cog Location:${NC} $COGS_DIR/poehub"
 echo -e "${BLUE}Startup Script:${NC} $HOME/start_bot.sh"
 echo ""
 echo "=========================================="

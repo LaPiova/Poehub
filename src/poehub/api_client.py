@@ -1,67 +1,71 @@
+"""Poe API client wrapper.
+
+This module wraps the OpenAI Python SDK's async client configured to talk to
+Poe's OpenAI-compatible endpoint.
+"""
+
+from __future__ import annotations
+
 import asyncio
-import time
 import logging
-from typing import List, Dict, Any, Optional, AsyncGenerator
+import time
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 from openai import AsyncOpenAI
 
 log = logging.getLogger("red.poehub.api")
 
 class PoeClient:
-    """
-    Client for interacting with Poe API via OpenAI SDK
-    """
+    """Client for interacting with Poe API via the OpenAI SDK."""
     
-    def __init__(self, api_key: str, base_url: str = "https://api.poe.com/v1"):
-        self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url
-        )
+    def __init__(self, api_key: str, base_url: str = "https://api.poe.com/v1") -> None:
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._cached_models: Optional[List[Dict[str, Any]]] = None
         self._models_cache_time: float = 0
         self._models_cache_duration: int = 3600  # 1 hour cache
         
     async def get_models(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
-        """
-        Fetch available models from Poe API with caching
-        """
+        """Return available models from Poe API with caching."""
         current_time = time.time()
-        if (not force_refresh and 
-            self._cached_models is not None and 
-            current_time - self._models_cache_time < self._models_cache_duration):
+        if (
+            not force_refresh
+            and self._cached_models is not None
+            and current_time - self._models_cache_time < self._models_cache_duration
+        ):
             return self._cached_models
             
         try:
             response = await self.client.models.list()
             
-            models = []
+            models: List[Dict[str, Any]] = []
             for model in response.data:
-                models.append({
-                    "id": model.id,
-                    "object": model.object,
-                    "created": getattr(model, 'created', None),
-                    "owned_by": getattr(model, 'owned_by', 'poe')
-                })
+                models.append(
+                    {
+                        "id": model.id,
+                        "object": model.object,
+                        "created": getattr(model, "created", None),
+                        "owned_by": getattr(model, "owned_by", "poe"),
+                    }
+                )
                 
             self._cached_models = models
             self._models_cache_time = current_time
-            log.info(f"Fetched {len(models)} models from Poe API")
+            log.info("Fetched %s models from Poe API", len(models))
             return models
             
-        except Exception as e:
-            log.error(f"Error fetching models: {e}", exc_info=True)
+        except Exception:  # noqa: BLE001 - surface to caller
+            log.exception("Error fetching models")
             if self._cached_models:
                 log.info("Using expired cached models due to fetch error")
                 return self._cached_models
-            raise e
+            raise
 
     async def stream_chat(
-        self, 
-        model: str, 
-        messages: List[Dict[str, Any]]
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
     ) -> AsyncGenerator[str, None]:
-        """
-        Stream chat completion responses
-        """
+        """Stream chat completion responses."""
         try:
             stream = await self.client.chat.completions.create(
                 model=model,
@@ -75,16 +79,14 @@ class PoeClient:
                     if delta.content:
                         yield delta.content
                         
-        except Exception as e:
-            log.error(f"Error during stream: {e}", exc_info=True)
-            raise e
+        except Exception:  # noqa: BLE001 - surface to caller
+            log.exception("Error during chat stream")
+            raise
 
     @staticmethod
     def format_image_message(text: str, image_urls: List[str]) -> List[Dict[str, Any]]:
-        """
-        Format message with images using OpenAI Vision format
-        """
-        content = []
+        """Format message with images using the OpenAI Vision content format."""
+        content: List[Dict[str, Any]] = []
         
         if text:
             content.append({
@@ -103,14 +105,14 @@ class PoeClient:
         return content
 
     def get_cache_age(self) -> int:
-        """Return the age of the model cache in seconds"""
+        """Return the age of the model cache in seconds."""
         return int(time.time() - self._models_cache_time)
 
 
 class DummyPoeClient:
-    """Offline-friendly stand-in client for local debugging"""
+    """Offline-friendly stand-in client for local debugging."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._models_cache_time = time.time()
         self._models: List[Dict[str, Any]] = [
             {"id": "dummy-claude-lite", "object": "model", "created": None, "owned_by": "poehub"},
@@ -124,7 +126,9 @@ class DummyPoeClient:
         await asyncio.sleep(0.05)
         return self._models
 
-    async def stream_chat(self, model: str, messages: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+    async def stream_chat(
+        self, model: str, messages: List[Dict[str, Any]]
+    ) -> AsyncGenerator[str, None]:
         preview = self._extract_latest_user_prompt(messages)
         response = (
             f"[Dummy Response - {model}]\n"

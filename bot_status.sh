@@ -16,21 +16,24 @@ echo -e "${BLUE}  PoeBot Status${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
+INSTANCE_NAME="${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+SCREEN_NAME="${POEHUB_SCREEN_NAME:-poebot}"
+
 # Check screen sessions
 echo -e "${BLUE}Screen Sessions:${NC}"
-if screen -list | grep -q "poebot"; then
-    echo -e "${GREEN}✓${NC} Screen session 'poebot' is running"
-    screen -list | grep poebot
+if screen -list | grep -q "$SCREEN_NAME"; then
+    echo -e "${GREEN}✓${NC} Screen session '$SCREEN_NAME' is running"
+    screen -list | grep "$SCREEN_NAME"
 else
-    echo -e "${YELLOW}⚠${NC}  No screen session 'poebot' found"
+    echo -e "${YELLOW}⚠${NC}  No screen session '$SCREEN_NAME' found"
 fi
 echo ""
 
 # Check redbot processes
 echo -e "${BLUE}Redbot Processes:${NC}"
-if pgrep -f "redbot PoeBot" > /dev/null; then
+if pgrep -f "redbot ${INSTANCE_NAME}" > /dev/null; then
     echo -e "${GREEN}✓${NC} Redbot process is running"
-    ps aux | grep "redbot PoeBot" | grep -v grep
+    ps aux | grep "redbot ${INSTANCE_NAME}" | grep -v grep
 else
     echo -e "${YELLOW}⚠${NC}  No redbot process found"
 fi
@@ -51,20 +54,23 @@ echo ""
 
 # Check cog files
 echo -e "${BLUE}PoeHub Cog Files:${NC}"
-if [ -d "/home/ubuntu/red-cogs/poehub" ]; then
+COGS_DIR="${POEHUB_COGS_DIR:-$HOME/red-cogs}"
+COG_DIR="$COGS_DIR/poehub"
+
+if [ -d "$COG_DIR" ]; then
     echo -e "${GREEN}✓${NC} Cog directory exists"
-    ls -lh /home/ubuntu/red-cogs/poehub/*.py 2>/dev/null | awk '{print "  " $9 " (" $5 ")"}'
+    find "$COG_DIR" -maxdepth 2 -type f -name "*.py" -print 2>/dev/null | awk '{print "  " $0}'
 else
-    echo -e "${YELLOW}⚠${NC}  Cog directory not found at /home/ubuntu/red-cogs/poehub"
+    echo -e "${YELLOW}⚠${NC}  Cog directory not found at $COG_DIR"
 fi
 echo ""
 
 # Summary
 echo -e "${BLUE}=========================================${NC}"
-if screen -list | grep -q "poebot" || pgrep -f "redbot PoeBot" > /dev/null; then
+if screen -list | grep -q "$SCREEN_NAME" || pgrep -f "redbot ${INSTANCE_NAME}" > /dev/null; then
     echo -e "${GREEN}Status: BOT IS RUNNING${NC}"
     echo ""
-    echo "To view logs:    screen -r poebot"
+    echo "To view logs:    screen -r ${SCREEN_NAME}"
     echo "To stop bot:     ./stop_bot.sh"
 else
     echo -e "${YELLOW}Status: BOT IS NOT RUNNING${NC}"

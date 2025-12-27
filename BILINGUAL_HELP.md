@@ -276,8 +276,8 @@ A: The `!说明` alias supports Simplified Chinese users too.
 `!说明` 別名也支援簡體中文使用者。
 
 ### Q: Can I contribute more translations? 我可以貢獻更多翻譯嗎？
-A: Yes! Edit the docstrings in `poehub.py` to add more languages.
-可以！編輯 `poehub.py` 中的文檔字串以添加更多語言。
+A: Yes! Edit the docstrings in `src/poehub/poehub.py` to add more languages.
+可以！編輯 `src/poehub/poehub.py` 中的文檔字串以添加更多語言。
 
 ---
 

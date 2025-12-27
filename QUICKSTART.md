@@ -39,7 +39,7 @@ screen -r poebot
 
 ### 2. In Discord, add the cog directory
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 ```
 *Note: Must use absolute path, not ~/red-cogs*
 
@@ -120,7 +120,7 @@ Just send a message to the bot via DM (no command needed)!
 
 ### Can't load cog?
 1. Verify path: `[p]paths`
-2. Check files exist: `ls ~/red-cogs/poehub/`
+2. Check files exist: `ls "$HOME/red-cogs/poehub/"`
 3. Reinstall dependencies: `pip install openai cryptography`
 
 ### API errors?
@@ -149,8 +149,8 @@ cd ~/Poehub
 # Pull new changes if from git
 # git pull
 
-# Copy updated files
-cp poehub.py api_client.py conversation_manager.py encryption.py __init__.py info.json ~/red-cogs/poehub/
+# Sync updated cog package into red-cogs
+./sync_to_red.sh
 
 # Reload in Discord
 [p]reload poehub
