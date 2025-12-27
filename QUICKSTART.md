@@ -61,6 +61,11 @@ Get your key from: https://poe.com/api_key
 ```
 [p]ask What is the meaning of life?
 ```
+ 
+Or just mention the bot:
+```
+@PoeBot What is the meaning of life?
+```
 
 ### With Images
 Upload an image and ask:
