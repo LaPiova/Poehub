@@ -15,15 +15,26 @@ A comprehensive Red-DiscordBot Cog that integrates with Poe's AI platform using 
 - 🌐 **Bilingual Help**: Full Traditional Chinese (繁體中文) support
 - 🔄 **Auto-Start**: Optional systemd service for automatic bot start on server reboot
 
+## Before You Start
+
+- ✅ **Discord Bot Token** – create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), invite it to your server, and keep the token ready for `redbot-setup`.
+- 🔑 **Poe API Key** – required for live conversations. For local debugging without a key, set `POEHUB_ENABLE_DUMMY_MODE=1` first and then enable dummy mode with `[p]poedummymode on`.
+- 🐍 **Python 3.8.1–3.11** – Red-DiscordBot is incompatible with Python 3.12+. The deployment scripts create a compatible virtualenv automatically.
+- 💻 **Supported OS** – Ubuntu 22.04/24.04 (primary) or Arch Linux. Use the matching deployment script below.
+
 ## Installation
 
 ### Option 1: Automated Deployment (Recommended)
 
-Run the deployment script on a fresh Ubuntu server:
+Run the deployment script on a fresh system:
 
 ```bash
 cd ~/Poehub
+# Ubuntu / Debian-based
 ./deploy_poe_bot.sh
+
+# Arch Linux
+./deploy_poe_bot_on_arch.sh
 ```
 
 **Important:** Red-DiscordBot requires Python 3.8.1 to 3.11.x (NOT 3.12+). 
@@ -85,6 +96,47 @@ Once the bot is running, configure it in Discord:
 ```
 [p]poeapikey <your_poe_api_key>
 ```
+
+4. **Open the interactive config panel**:
+```
+[p]poeconfig
+```
+Use the dropdown + buttons to change your default model, set/clear personal prompts, or (if you're the owner) toggle dummy mode without memorizing every text command.
+
+> Dummy controls only appear after you set `POEHUB_ENABLE_DUMMY_MODE=1`. By default the flag is `0`, so release builds stay clean until you opt in.
+
+## Offline Dummy Mode (No Poe API Key)
+
+Need to debug commands before you have a real Poe API key? After setting `POEHUB_ENABLE_DUMMY_MODE=1`, enable the dummy client:
+
+```
+[p]poedummymode on
+```
+
+PoeHub will return local stub replies while the rest of the workflow (conversations, prompts, permissions) stays identical. Switch back to the live Poe API when you're ready:
+
+```
+[p]poedummymode off
+[p]poeapikey YOUR_REAL_KEY
+```
+
+Use this workflow to validate deployments, Discord permissions, and data storage without touching the live Poe service.
+
+### Enabling Dummy Mode (Opt-in)
+
+Dummy mode is hidden by default (`POEHUB_ENABLE_DUMMY_MODE=0`). To expose the offline workflow on a dev box, set the variable before launching Red:
+
+```bash
+export POEHUB_ENABLE_DUMMY_MODE=1  # or add Environment=POEHUB_ENABLE_DUMMY_MODE=1 to your systemd unit
+./start_bot.sh
+```
+
+Once enabled:
+- `[p]poedummymode` and the config button appear for the bot owner
+- The cog lets you choose between live Poe API and the local stub
+- Help embeds/docs mention the dummy commands
+
+Set `POEHUB_ENABLE_DUMMY_MODE=0` (or unset it) again when shipping to another server so users only see the live workflow.
 
 ## Usage
 
@@ -197,6 +249,13 @@ Sets a default prompt that all users will use unless they set their own.
 [p]cleardefaultprompt
 ```
 Removes the default system prompt.
+
+#### Toggle Dummy Mode (Owner Only, if enabled)
+```
+[p]poedummymode on
+[p]poedummymode off
+```
+Quickly switch between the offline dummy client and the real Poe API. This command is available only when `POEHUB_ENABLE_DUMMY_MODE=1`.
 
 ### DM Support
 

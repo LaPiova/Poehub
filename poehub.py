@@ -9,18 +9,28 @@ from redbot.core import commands as red_commands, Config
 from redbot.core.bot import Red
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any
+import os
+from typing import Optional, List, Dict, Any, Union, Set
 import time
 
 # Handle imports
 try:
     from .encryption import EncryptionHelper, generate_key
-    from .api_client import PoeClient
+    from .api_client import PoeClient, DummyPoeClient
     from .conversation_manager import ConversationManager
 except ImportError:
     from encryption import EncryptionHelper, generate_key
-    from api_client import PoeClient
+    from api_client import PoeClient, DummyPoeClient
     from conversation_manager import ConversationManager
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    """Return True if the env var is set to a truthy value."""
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+ALLOW_DUMMY_MODE = _env_flag("POEHUB_ENABLE_DUMMY_MODE", "0")
 
 
 log = logging.getLogger("red.poehub")
@@ -47,13 +57,15 @@ class PoeHub(red_commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890, force_registration=True)
+        self.allow_dummy_mode = ALLOW_DUMMY_MODE
         
         # Default configuration
         default_global = {
             "api_key": None,
             "encryption_key": None,
             "base_url": "https://api.poe.com/v1",
-            "default_system_prompt": None  # Default system prompt set by bot owner
+            "default_system_prompt": None,  # Default system prompt set by bot owner
+            "use_dummy_api": False  # Allow offline debugging without Poe API key
         }
         
         default_user = {
@@ -66,7 +78,7 @@ class PoeHub(red_commands.Cog):
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
         
-        self.client: Optional[PoeClient] = None
+        self.client: Optional[Union[PoeClient, DummyPoeClient]] = None
         self.conversation_manager: Optional[ConversationManager] = None
         self.encryption: Optional[EncryptionHelper] = None
         
@@ -96,6 +108,18 @@ class PoeHub(red_commands.Cog):
     
     async def _init_client(self):
         """Initialize the Poe client"""
+        self.client = None
+        use_dummy = await self.config.use_dummy_api()
+        if use_dummy and not self.allow_dummy_mode:
+            # Ensure persisted config stays in sync with release builds
+            await self.config.use_dummy_api.set(False)
+            log.info("Dummy API mode is disabled in this release build; falling back to live client.")
+            use_dummy = False
+        if use_dummy:
+            self.client = DummyPoeClient()
+            log.info("Dummy PoeHub client initialized (offline mode)")
+            return
+
         api_key = await self.config.api_key()
         base_url = await self.config.base_url()
         
@@ -103,7 +127,12 @@ class PoeHub(red_commands.Cog):
             self.client = PoeClient(api_key=api_key, base_url=base_url)
             log.info("PoeHub API client initialized")
         else:
-            log.warning("No API key set. Use [p]poeapikey to set one.")
+            warning = "No API key set. Use [p]poeapikey to set one"
+            if self.allow_dummy_mode:
+                warning += " or enable dummy mode."
+            else:
+                warning += "."
+            log.warning(warning)
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
         """
@@ -163,6 +192,84 @@ class PoeHub(red_commands.Cog):
         
         # Fall back to default prompt
         return await self.config.default_system_prompt()
+
+    async def _build_model_select_options(self) -> List[discord.SelectOption]:
+        """Build dropdown options for the interactive config panel"""
+        fallback_models = [
+            "Claude-3.5-Sonnet",
+            "Claude-3-Opus",
+            "Claude-3-Haiku",
+            "GPT-4o",
+            "GPT-4",
+            "GPT-3.5-Turbo",
+            "Gemini-1.5-Pro",
+            "Gemini-Pro",
+            "Llama-3.1-405B",
+        ]
+        options: List[discord.SelectOption] = []
+        seen: Set[str] = set()
+
+        if self.client:
+            try:
+                models = await self.client.get_models()
+                for model in models:
+                    model_id = model.get("id") if isinstance(model, dict) else None
+                    if not model_id or model_id in seen:
+                        continue
+                    seen.add(model_id)
+                    options.append(discord.SelectOption(label=model_id[:100], value=model_id))
+                    if len(options) >= 25:
+                        break
+            except Exception as exc:
+                log.warning("Could not fetch live model list for config menu: %s", exc)
+
+        if not options:
+            for model_id in fallback_models:
+                options.append(discord.SelectOption(label=model_id, value=model_id))
+
+        return options[:25]
+
+    async def _build_config_embed(
+        self,
+        ctx: red_commands.Context,
+        owner_mode: bool,
+        dummy_state: bool
+    ) -> discord.Embed:
+        """Create the status embed for the interactive config menu"""
+        description = (
+            "Use the dropdown to choose your default model, set or clear your personal system prompt, "
+            "and close the menu when you're done.\n\n"
+            "Prefer commands? You can still use `[p]setmodel`, `[p]setprompt`, `[p]clearprompt`"
+        )
+        if owner_mode and self.allow_dummy_mode:
+            description += ", and `[p]poedummymode` (owner only)."
+        else:
+            description += "."
+
+        embed = discord.Embed(
+            title="⚙️ PoeHub Configuration",
+            description=description,
+            color=discord.Color.blurple()
+        )
+        current_model = await self.config.user(ctx.author).model()
+        embed.add_field(name="Current Model", value=f"`{current_model}`", inline=True)
+
+        user_prompt = await self.config.user(ctx.author).system_prompt()
+        embed.add_field(
+            name="Personal Prompt",
+            value="已設定" if user_prompt else "未設定",
+            inline=True
+        )
+
+        if owner_mode and self.allow_dummy_mode:
+            status_text = "ON" if dummy_state else "OFF"
+            embed.add_field(
+                name="Dummy API Mode",
+                value=f"{status_text} (owner only)",
+                inline=True
+            )
+
+        return embed
     
     async def _stream_response(
         self, 
@@ -328,6 +435,56 @@ class PoeHub(red_commands.Cog):
             pass
         
         await ctx.send("✅ API key has been set successfully! (Your message was deleted for security)")
+
+    @red_commands.command(name="poedummymode")
+    @red_commands.is_owner()
+    async def toggle_dummy_mode(self, ctx: red_commands.Context, *, state: Optional[str] = None):
+        """Enable/disable offline dummy API mode or show its status"""
+        if not self.allow_dummy_mode:
+            await ctx.send("❌ Dummy API mode is disabled in this release build.")
+            return
+        if state is None:
+            enabled = await self.config.use_dummy_api()
+            status_text = "ON" if enabled else "OFF"
+            await ctx.send(f"🔧 Dummy API mode is currently **{status_text}**.")
+            return
+
+        normalized = state.strip().lower()
+        if normalized in {"on", "true", "enable", "enabled", "1"}:
+            enabled = True
+        elif normalized in {"off", "false", "disable", "disabled", "0"}:
+            enabled = False
+        else:
+            await ctx.send("❌ Please specify `on` or `off`.")
+            return
+
+        await self.config.use_dummy_api.set(enabled)
+        await self._init_client()
+
+        if enabled:
+            await ctx.send("✅ Dummy API mode enabled. PoeHub will return local stub responses for debugging.")
+        else:
+            await ctx.send("✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`.")
+
+    @red_commands.command(name="poeconfig", aliases=["poehubconfig", "poesettings"])
+    async def open_config_menu(self, ctx: red_commands.Context):
+        """Open the interactive configuration panel"""
+        model_options = await self._build_model_select_options()
+        is_owner = await self.bot.is_owner(ctx.author)
+        dummy_state = await self.config.use_dummy_api() if (is_owner and self.allow_dummy_mode) else False
+
+        embed = await self._build_config_embed(ctx, is_owner, dummy_state)
+
+        view = PoeConfigView(
+            cog=self,
+            ctx=ctx,
+            model_options=model_options,
+            owner_mode=is_owner,
+            dummy_state=dummy_state
+        )
+
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
     
     @red_commands.command(name="ask")
     async def ask(self, ctx: red_commands.Context, *, query: str):
@@ -811,8 +968,194 @@ class PoeHub(red_commands.Cog):
         )
         embed.add_field(name="📝 Basic Commands 基本指令", value="**!ask**, **!setmodel**, **!mymodel**, **!listmodels**, **!searchmodels**", inline=False)
         embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**, **!clear_history**, **!delete_all_conversations**", inline=False)
-        embed.add_field(name="⚙️ Settings 設定", value="**!setprompt**, **!purge_my_data**", inline=False)
+        settings_value = "**!poeconfig**, **!setprompt**, **!clearprompt**, **!purge_my_data**"
+        if self.allow_dummy_mode:
+            settings_value += ", **!poedummymode** (擁有者)"
+        embed.add_field(name="⚙️ Settings 設定", value=settings_value, inline=False)
         await ctx.send(embed=embed)
+
+
+class PoeConfigView(discord.ui.View):
+    """Interactive configuration dashboard."""
+
+    def __init__(
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        model_options: List[discord.SelectOption],
+        owner_mode: bool,
+        dummy_state: bool
+    ):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.ctx = ctx
+        self.message: Optional[discord.Message] = None
+        self.owner_mode = owner_mode
+
+        if model_options:
+            self.add_item(ModelSelect(cog, ctx, model_options))
+
+        self.add_item(SetPromptButton(cog, ctx))
+        self.add_item(ShowPromptButton(cog, ctx))
+        self.add_item(ClearPromptButton(cog, ctx))
+
+        if owner_mode and cog.allow_dummy_mode:
+            self.add_item(DummyToggleButton(cog, ctx, dummy_state))
+
+        self.add_item(CloseMenuButton())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.ctx.author.id:
+            await interaction.response.send_message("此設定面板僅限觸發者使用。", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        if not self.message:
+            return
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
+
+class ModelSelect(discord.ui.Select):
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]):
+        placeholder = "Select your default model"
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
+        self.cog = cog
+        self.ctx = ctx
+
+    async def callback(self, interaction: discord.Interaction):
+        model_choice = self.values[0]
+        await self.cog.config.user(self.ctx.author).model.set(model_choice)
+        await interaction.response.send_message(f"✅ 模型已設定為 `{model_choice}`", ephemeral=True)
+
+
+class PromptModal(discord.ui.Modal, title="設定個人提示詞 / Set Personal Prompt"):
+    prompt: discord.ui.TextInput = discord.ui.TextInput(
+        label="System Prompt",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=1500,
+        placeholder="Describe how PoeHub should respond..."
+    )
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
+        super().__init__()
+        self.cog = cog
+        self.ctx = ctx
+
+    async def on_submit(self, interaction: discord.Interaction):
+        prompt_text = self.prompt.value.strip()
+        await self.cog.config.user(self.ctx.author).system_prompt.set(prompt_text)
+        preview = prompt_text[:200] + ("..." if len(prompt_text) > 200 else "")
+        await interaction.response.send_message(
+            f"✅ 已更新個人提示詞。Preview: ```{preview}```",
+            ephemeral=True
+        )
+
+
+class SetPromptButton(discord.ui.Button):
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
+        super().__init__(label="Set Personal Prompt", style=discord.ButtonStyle.primary)
+        self.cog = cog
+        self.ctx = ctx
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(PromptModal(self.cog, self.ctx))
+
+
+class ShowPromptButton(discord.ui.Button):
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
+        super().__init__(label="View Prompt", style=discord.ButtonStyle.secondary)
+        self.cog = cog
+        self.ctx = ctx
+
+    async def callback(self, interaction: discord.Interaction):
+        user_prompt = await self.cog.config.user(self.ctx.author).system_prompt()
+        default_prompt = await self.cog.config.default_system_prompt()
+
+        if not user_prompt and not default_prompt:
+            await interaction.response.send_message("目前沒有設定任何提示詞。", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="📝 System Prompt", color=discord.Color.blurple())
+        if user_prompt:
+            embed.add_field(
+                name="Personal",
+                value=f"```{user_prompt[:1000]}{'...' if len(user_prompt) > 1000 else ''}```",
+                inline=False
+            )
+        if default_prompt:
+            embed.add_field(
+                name="Default",
+                value=f"```{default_prompt[:1000]}{'...' if len(default_prompt) > 1000 else ''}```",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class ClearPromptButton(discord.ui.Button):
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
+        super().__init__(label="Clear Prompt", style=discord.ButtonStyle.secondary)
+        self.cog = cog
+        self.ctx = ctx
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.cog.config.user(self.ctx.author).system_prompt.set(None)
+        await interaction.response.send_message("✅ 個人提示詞已清除。", ephemeral=True)
+
+
+class DummyToggleButton(discord.ui.Button):
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, enabled: bool):
+        label = f"Dummy Mode: {'ON' if enabled else 'OFF'}"
+        style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+        super().__init__(label=label, style=style)
+        self.cog = cog
+        self.ctx = ctx
+
+    async def callback(self, interaction: discord.Interaction):
+        new_state = not await self.cog.config.use_dummy_api()
+        await self.cog.config.use_dummy_api.set(new_state)
+        await self.cog._init_client()
+        self.label = f"Dummy Mode: {'ON' if new_state else 'OFF'}"
+        self.style = discord.ButtonStyle.success if new_state else discord.ButtonStyle.secondary
+
+        if self.view:
+            new_options = await self.cog._build_model_select_options()
+            for child in self.view.children:
+                if isinstance(child, ModelSelect):
+                    child.options = new_options
+                    break
+            owner_mode = getattr(self.view, "owner_mode", True)
+            embed = await self.cog._build_config_embed(self.ctx, owner_mode, new_state)
+            await interaction.response.edit_message(embed=embed, view=self.view)
+            await interaction.followup.send(
+                "✅ Dummy API mode 已啟用。" if new_state else "✅ Dummy API mode 已關閉。",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "✅ Dummy API mode 狀態已更新。",
+                ephemeral=True
+            )
+
+
+class CloseMenuButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Close Menu", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if view:
+            for child in view.children:
+                child.disabled = True
+            view.stop()
+            await interaction.response.edit_message(view=view)
 
 
 async def setup(bot: Red):
