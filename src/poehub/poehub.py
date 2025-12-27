@@ -508,6 +508,7 @@ class PoeHub(red_commands.Cog):
         
         # --- Handle Quote / Reply Context ---
         quote_context = ""
+        ref_msg = None
         if message.reference and message.reference.message_id:
             try:
                 # Attempt to fetch the referenced message
@@ -530,6 +531,12 @@ class PoeHub(red_commands.Cog):
         image_urls = []
         if message.attachments:
             for attachment in message.attachments:
+                if attachment.content_type and attachment.content_type.startswith("image/"):
+                    image_urls.append(attachment.url)
+        
+        # Also check referenced message for images
+        if ref_msg and ref_msg.attachments:
+            for attachment in ref_msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith("image/"):
                     image_urls.append(attachment.url)
         

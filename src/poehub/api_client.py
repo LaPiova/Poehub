@@ -128,7 +128,17 @@ class OpenAIProvider(BaseLLMClient):
         
         # Default base_url if not customized
         final_base_url = base_url if base_url else "https://api.openai.com/v1"
-        self.client = AsyncOpenAI(api_key=api_key, base_url=final_base_url)
+        
+        # Use a custom httpx client for better control over timeouts/limits
+        # 60s connect, 300s read
+        import httpx
+        http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=60.0))
+        
+        self.client = AsyncOpenAI(
+            api_key=api_key, 
+            base_url=final_base_url,
+            http_client=http_client
+        )
 
     async def _fetch_models(self) -> List[Dict[str, Any]]:
         response = await self.client.models.list()
@@ -203,21 +213,61 @@ class OpenAIProvider(BaseLLMClient):
         model: str,
         messages: List[Dict[str, Any]],
     ) -> AsyncGenerator[Union[str, TokenUsage], None]:
-        try:
-            # Handle DeepSeek specific "reasoner" model separation if needed? 
-            # DeepSeek uses same API, so standard call works.
-            
-            # Add stream_options to get usage statistics (OpenAI standard)
-            create_kwargs = {
-                "model": model,
-                "messages": messages,
-                "stream": True,
-            }
-            if "deepseek" not in str(self.client.base_url): # OpenRouter/standard support it
-                 create_kwargs["stream_options"] = {"include_usage": True}
+        # Retry configuration
+        max_retries = 3
+        current_try = 0
+        
+        while True:
+            try:
+                current_try += 1
+                # Handle DeepSeek specific "reasoner" model separation if needed? 
+                # DeepSeek uses same API, so standard call works.
+                
+                # Add stream_options to get usage statistics (OpenAI standard)
+                create_kwargs = {
+                    "model": model,
+                    "messages": messages,
+                    "stream": True,
+                    # Set a reasonable timeout for the request
+                    "timeout": 60.0, 
+                }
+                if "deepseek" not in str(self.client.base_url): # OpenRouter/standard support it
+                     create_kwargs["stream_options"] = {"include_usage": True}
 
-            stream = await self.client.chat.completions.create(**create_kwargs)
-            
+                stream = await self.client.chat.completions.create(**create_kwargs)
+                
+                # If we successfully got the stream, we break the retry loop and start yielding
+                break
+                
+            except (OpenAIError, Exception) as e:
+                # Check for specific connection errors that are worth retrying
+                # "peer closed connection" is often an httpx.RemoteProtocolError wrapped in APIConnectionError
+                is_connection_error = (
+                    "peer closed connection" in str(e).lower() 
+                    or "connection error" in str(e).lower()
+                    or "incomplete chunked read" in str(e).lower()
+                )
+                
+                if is_connection_error and current_try < max_retries:
+                    log.warning(f"Connection error with Poe API (Attempt {current_try}/{max_retries}): {e}. Retrying...")
+                    await asyncio.sleep(1 * current_try) # Exponential-ish backoff
+                    continue
+                
+                # If not retryable or out of retries, re-raise
+                raise
+        
+        # NOTE: The following logic for processing the stream must be OUTSIDE the `while True` loop
+        # but inside the outer `try...except` block which is now... ambiguous.
+        # Wait, the outer try/except (lines 297-306 in original, which is the `except Exception as e` block I am looking at below)
+        # needs to wrap the ENTIRE logic including the loop and the processing.
+        # My previous edit removed the outer `try:` block opening. 
+        # I need to restore the structure:
+        # try:
+        #    ... retry loop ...
+        #    ... processing loop ...
+        # except Exception: ...
+        
+        try:
             final_usage = None
             
             async for chunk in stream:
@@ -265,9 +315,15 @@ class OpenAIProvider(BaseLLMClient):
                     final_usage.cost = PricingOracle.calculate_cost(provider_name, model, final_usage)
 
                 yield final_usage
-
-        except Exception:
-            log.exception("Error during OpenAI compatible stream")
+        except Exception as e:
+            # If we crash mid-stream, we can't retry, so just log and re-raise
+            # But we can try to provide a better error message if it's the specific chunk error
+            if "incomplete chunked read" in str(e).lower() or "peer closed connection" in str(e).lower():
+                 log.error(f"Stream interrupted by Poe API connection drop: {e}")
+                 # We yield a user-friendly error string if possible, but the caller expects str or TokenUsage.
+                 # The caller wraps this in try/except Exception, so raising is fine.
+            else:
+                 log.exception("Error during OpenAI compatible stream")
             raise
 
 
