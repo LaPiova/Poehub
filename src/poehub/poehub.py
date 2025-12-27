@@ -22,8 +22,10 @@ from redbot.core.bot import Red
 from .api_client import DummyPoeClient, PoeClient
 from .conversation_manager import ConversationManager
 from .encryption import EncryptionHelper, generate_key
+from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
+from .ui.language_view import LanguageView
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -74,7 +76,8 @@ class PoeHub(red_commands.Cog):
             "model": "Claude-3.5-Sonnet",
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
-            "system_prompt": None  # User's custom system prompt (overrides default)
+            "system_prompt": None,  # User's custom system prompt (overrides default)
+            "language": LANG_EN,  # Output language for menus/help
         }
         
         self.config.register_global(**default_global)
@@ -86,6 +89,18 @@ class PoeHub(red_commands.Cog):
         
         # Initialize encryption on load
         asyncio.create_task(self._initialize())
+
+    async def _get_language(self, user_id: int) -> str:
+        """Return the user's language code."""
+        lang = await self.config.user_from_id(user_id).language()
+        if lang in SUPPORTED_LANGS:
+            return lang
+        return LANG_EN
+
+    async def _t(self, user_id: int, key: str, **kwargs: object) -> str:
+        """Translate a string key for a specific user."""
+        lang = await self._get_language(user_id)
+        return tr(lang, key, **kwargs)
     
     async def _initialize(self) -> None:
         """Initialize encryption, conversation manager, and API client."""
@@ -245,40 +260,34 @@ class PoeHub(red_commands.Cog):
         self,
         ctx: red_commands.Context,
         owner_mode: bool,
-        dummy_state: bool
+        dummy_state: bool,
+        lang: str,
     ) -> discord.Embed:
         """Create the status embed for the interactive config menu."""
-        description = (
-            "Use the dropdown to choose your default model, set or clear your personal system prompt, "
-            "and close the menu when you're done.\n\n"
-            "Prefer commands? You can still use `[p]setmodel`, `[p]setprompt`, `[p]clearprompt`"
-        )
-        if owner_mode and self.allow_dummy_mode:
-            description += ", and `[p]poedummymode` (owner only)."
-        else:
-            description += "."
-
         embed = discord.Embed(
-            title="⚙️ PoeHub Configuration",
-            description=description,
-            color=discord.Color.blurple()
+            title=tr(lang, "CONFIG_TITLE"),
+            description=tr(lang, "CONFIG_DESC"),
+            color=discord.Color.blurple(),
         )
         current_model = await self.config.user(ctx.author).model()
-        embed.add_field(name="Current Model", value=f"`{current_model}`", inline=True)
+        embed.add_field(
+            name=tr(lang, "CONFIG_FIELD_MODEL"),
+            value=f"`{current_model}`",
+            inline=True,
+        )
 
         user_prompt = await self.config.user(ctx.author).system_prompt()
         embed.add_field(
-            name="Personal Prompt",
-            value="已設定" if user_prompt else "未設定",
-            inline=True
+            name=tr(lang, "CONFIG_FIELD_PROMPT"),
+            value=tr(lang, "CONFIG_PROMPT_SET") if user_prompt else tr(lang, "CONFIG_PROMPT_NOT_SET"),
+            inline=True,
         )
 
         if owner_mode and self.allow_dummy_mode:
-            status_text = "ON" if dummy_state else "OFF"
             embed.add_field(
-                name="Dummy API Mode",
-                value=f"{status_text} (owner only)",
-                inline=True
+                name=tr(lang, "CONFIG_FIELD_DUMMY"),
+                value=tr(lang, "CONFIG_DUMMY_ON") if dummy_state else tr(lang, "CONFIG_DUMMY_OFF"),
+                inline=True,
             )
 
         return embed
@@ -487,20 +496,37 @@ class PoeHub(red_commands.Cog):
     @red_commands.command(name="poeconfig", aliases=["config", "menu"])
     async def open_config_menu(self, ctx: red_commands.Context):
         """Open the interactive configuration panel"""
+        lang = await self._get_language(ctx.author.id)
         model_options = await self._build_model_select_options()
         is_owner = await self.bot.is_owner(ctx.author)
         dummy_state = await self.config.use_dummy_api() if (is_owner and self.allow_dummy_mode) else False
 
-        embed = await self._build_config_embed(ctx, is_owner, dummy_state)
+        embed = await self._build_config_embed(ctx, is_owner, dummy_state, lang)
 
         view = PoeConfigView(
             cog=self,
             ctx=ctx,
             model_options=model_options,
             owner_mode=is_owner,
-            dummy_state=dummy_state
+            dummy_state=dummy_state,
+            lang=lang,
         )
 
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    @red_commands.command(name="language", aliases=["lang"])
+    async def language_menu(self, ctx: red_commands.Context):
+        """Open the language selection menu."""
+        lang = await self._get_language(ctx.author.id)
+        current = LANG_LABELS.get(lang, lang)
+        embed = discord.Embed(
+            title=tr(lang, "LANG_TITLE"),
+            description=tr(lang, "LANG_DESC"),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name=tr(lang, "LANG_CURRENT"), value=f"`{current}`", inline=False)
+        view = LanguageView(self, ctx, lang)
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
     
@@ -811,7 +837,8 @@ class PoeHub(red_commands.Cog):
             await ctx.send("❌ System not initialized.")
             return
 
-        view = ConversationMenuView(self, ctx)
+        lang = await self._get_language(ctx.author.id)
+        view = ConversationMenuView(self, ctx, lang)
         embed = await view.refresh_content(None)
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
@@ -987,19 +1014,121 @@ class PoeHub(red_commands.Cog):
 
     @red_commands.command(name="poehubhelp", aliases=["phelp"])
     async def poehub_help(self, ctx: red_commands.Context):
-        """Show bilingual help for PoeHub commands"""
-        # NOTE: This help embed is intentionally concise; keep docs in README for full details.
+        """Show help for PoeHub commands (localized)."""
+        lang = await self._get_language(ctx.author.id)
+        prefix = ctx.clean_prefix
+
+        def line(cmd: str, desc: str) -> str:
+            return tr(lang, "HELP_LINE", cmd=f"{prefix}{cmd}", desc=desc)
+
         embed = discord.Embed(
-            title="🤖 PoeHub Commands 指令說明",
-            description="Bilingual command reference 雙語指令參考",
-            color=discord.Color.blue()
+            title=tr(lang, "HELP_TITLE"),
+            description=tr(lang, "HELP_DESC"),
+            color=discord.Color.blurple(),
         )
-        embed.add_field(name="📝 Basic Commands 基本指令", value="**!ask**, **!setmodel**, **!mymodel**, **!listmodels**, **!searchmodels**", inline=False)
-        embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**, **!clear_history**, **!delete_all_conversations**", inline=False)
-        settings_value = "**!poeconfig**, **!setprompt**, **!clearprompt**, **!purge_my_data**"
-        if self.allow_dummy_mode:
-            settings_value += ", **!poedummymode** (擁有者)"
-        embed.add_field(name="⚙️ Settings 設定", value=settings_value, inline=False)
+
+        if lang == LANG_ZH_TW:
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CHAT"),
+                value="\n".join(
+                    [
+                        line("ask", "提問並取得回覆（支援圖片）。"),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_MODELS"),
+                value="\n".join(
+                    [
+                        line("setmodel", "設定你的預設模型。"),
+                        line("mymodel", "查看目前模型。"),
+                        line("listmodels", "列出可用模型。"),
+                        line("searchmodels", "搜尋模型。"),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CONV"),
+                value="\n".join(
+                    [
+                        line("conv", "開啟對話管理選單。"),
+                        line("newconv", "建立新對話。"),
+                        line("switchconv", "切換對話。"),
+                        line("listconv", "列出你的對話。"),
+                        line("deleteconv", "刪除對話。"),
+                        line("clear_history", "清除目前對話紀錄。"),
+                    ]
+                ),
+                inline=False,
+            )
+            settings_lines = [
+                line("config", "開啟設定選單。"),
+                line("language", "切換 PoeHub 語言。"),
+                line("setprompt", "設定個人提示詞。"),
+                line("clearprompt", "清除個人提示詞。"),
+                line("purge_my_data", "刪除你的資料。"),
+            ]
+            if self.allow_dummy_mode:
+                settings_lines.append(line("poedummymode", "切換 Dummy API（僅擁有者）。"))
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_SETTINGS"),
+                value="\n".join(settings_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CHAT"),
+                value="\n".join(
+                    [
+                        line("ask", "Ask a question (supports images)."),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_MODELS"),
+                value="\n".join(
+                    [
+                        line("setmodel", "Set your default model."),
+                        line("mymodel", "Show your current model."),
+                        line("listmodels", "List available models."),
+                        line("searchmodels", "Search models."),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CONV"),
+                value="\n".join(
+                    [
+                        line("conv", "Open the conversation menu."),
+                        line("newconv", "Create a new conversation."),
+                        line("switchconv", "Switch conversations."),
+                        line("listconv", "List your conversations."),
+                        line("deleteconv", "Delete a conversation."),
+                        line("clear_history", "Clear the active conversation history."),
+                    ]
+                ),
+                inline=False,
+            )
+            settings_lines = [
+                line("config", "Open the settings menu."),
+                line("language", "Switch PoeHub language."),
+                line("setprompt", "Set a personal system prompt."),
+                line("clearprompt", "Clear your personal prompt."),
+                line("purge_my_data", "Delete your stored data."),
+            ]
+            if self.allow_dummy_mode:
+                settings_lines.append(line("poedummymode", "Toggle Dummy API (owner only)."))
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_SETTINGS"),
+                value="\n".join(settings_lines),
+                inline=False,
+            )
+
+        embed.set_footer(text=tr(lang, "HELP_LANG_HINT", cmd=f"{prefix}lang"))
         await ctx.send(embed=embed)
 
 

@@ -7,6 +7,7 @@ from typing import List, Optional, TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
+from ..i18n import tr
 from .common import CloseMenuButton
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -23,28 +24,34 @@ class PoeConfigView(discord.ui.View):
         model_options: List[discord.SelectOption],
         owner_mode: bool,
         dummy_state: bool,
+        lang: str,
     ) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
         self.message: Optional[discord.Message] = None
         self.owner_mode = owner_mode
+        lang = self.lang
 
         if model_options:
-            self.add_item(ModelSelect(cog, ctx, model_options))
+            self.add_item(ModelSelect(cog, ctx, model_options, lang))
 
-        self.add_item(SetPromptButton(cog, ctx))
-        self.add_item(ShowPromptButton(cog, ctx))
-        self.add_item(ClearPromptButton(cog, ctx))
+        self.add_item(SetPromptButton(cog, ctx, lang))
+        self.add_item(ShowPromptButton(cog, ctx, lang))
+        self.add_item(ClearPromptButton(cog, ctx, lang))
 
         if owner_mode and cog.allow_dummy_mode:
-            self.add_item(DummyToggleButton(cog, ctx, dummy_state))
+            self.add_item(DummyToggleButton(cog, ctx, dummy_state, lang))
 
-        self.add_item(CloseMenuButton())
+        self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("此設定面板僅限觸發者使用。", ephemeral=True)
+            await interaction.response.send_message(
+                tr(getattr(self, "lang", "en"), "RESTRICTED_MENU"),
+                ephemeral=True,
+            )
             return False
         return True
 
@@ -63,88 +70,110 @@ class ModelSelect(discord.ui.Select):
     """Dropdown for picking the default model."""
 
     def __init__(
-        self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        options: List[discord.SelectOption],
+        lang: str,
     ) -> None:
         super().__init__(
-            placeholder="Select your default model",
+            placeholder=tr(lang, "CONFIG_SELECT_MODEL_PLACEHOLDER"),
             min_values=1,
             max_values=1,
             options=options,
         )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         model_choice = self.values[0]
         await self.cog.config.user(self.ctx.author).model.set(model_choice)
         await interaction.response.send_message(
-            f"✅ 模型已設定為 `{model_choice}`", ephemeral=True
+            tr(self.lang, "CONFIG_MODEL_SET_OK", model=model_choice),
+            ephemeral=True,
         )
 
 
-class PromptModal(discord.ui.Modal, title="設定個人提示詞 / Set Personal Prompt"):
+class PromptModal(discord.ui.Modal):
     """Modal to update the user's personal system prompt."""
 
-    prompt: discord.ui.TextInput = discord.ui.TextInput(
-        label="System Prompt",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=1500,
-        placeholder="Describe how PoeHub should respond...",
-    )
-
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
-        super().__init__()
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(title=tr(lang, "CONFIG_PROMPT_MODAL_TITLE"))
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
+
+        self.prompt: discord.ui.TextInput = discord.ui.TextInput(
+            label=tr(lang, "CONFIG_PROMPT_MODAL_LABEL"),
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=1500,
+            placeholder=tr(lang, "CONFIG_PROMPT_MODAL_PLACEHOLDER"),
+        )
+        self.add_item(self.prompt)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         prompt_text = self.prompt.value.strip()
         await self.cog.config.user(self.ctx.author).system_prompt.set(prompt_text)
-        preview = prompt_text[:200] + ("..." if len(prompt_text) > 200 else "")
         await interaction.response.send_message(
-            f"✅ 已更新個人提示詞。Preview: ```{preview}```", ephemeral=True
+            tr(self.lang, "CONFIG_PROMPT_UPDATED"),
+            ephemeral=True,
         )
 
 
 class SetPromptButton(discord.ui.Button):
     """Button to open the personal prompt modal."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
-        super().__init__(label="Set Personal Prompt", style=discord.ButtonStyle.primary)
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONFIG_BTN_SET_PROMPT"),
+            style=discord.ButtonStyle.primary,
+        )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(PromptModal(self.cog, self.ctx))
+        await interaction.response.send_modal(PromptModal(self.cog, self.ctx, self.lang))
 
 
 class ShowPromptButton(discord.ui.Button):
     """Button to display the current prompt(s) in an embed."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
-        super().__init__(label="View Prompt", style=discord.ButtonStyle.secondary)
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONFIG_BTN_VIEW_PROMPT"),
+            style=discord.ButtonStyle.secondary,
+        )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         user_prompt = await self.cog.config.user(self.ctx.author).system_prompt()
         default_prompt = await self.cog.config.default_system_prompt()
 
         if not user_prompt and not default_prompt:
-            await interaction.response.send_message("目前沒有設定任何提示詞。", ephemeral=True)
+            await interaction.response.send_message(
+                tr(self.lang, "CONFIG_NO_PROMPT"),
+                ephemeral=True,
+            )
             return
 
-        embed = discord.Embed(title="📝 System Prompt", color=discord.Color.blurple())
+        embed = discord.Embed(
+            title=tr(self.lang, "CONFIG_PROMPT_EMBED_TITLE"),
+            color=discord.Color.blurple(),
+        )
         if user_prompt:
             embed.add_field(
-                name="Personal",
+                name=tr(self.lang, "CONFIG_PROMPT_FIELD_PERSONAL"),
                 value=f"```{user_prompt[:1000]}{'...' if len(user_prompt) > 1000 else ''}```",
                 inline=False,
             )
         if default_prompt:
             embed.add_field(
-                name="Default",
+                name=tr(self.lang, "CONFIG_PROMPT_FIELD_DEFAULT"),
                 value=f"```{default_prompt[:1000]}{'...' if len(default_prompt) > 1000 else ''}```",
                 inline=False,
             )
@@ -155,32 +184,44 @@ class ShowPromptButton(discord.ui.Button):
 class ClearPromptButton(discord.ui.Button):
     """Button to clear the user's personal prompt."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
-        super().__init__(label="Clear Prompt", style=discord.ButtonStyle.secondary)
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONFIG_BTN_CLEAR_PROMPT"),
+            style=discord.ButtonStyle.secondary,
+        )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await self.cog.config.user(self.ctx.author).system_prompt.set(None)
-        await interaction.response.send_message("✅ 個人提示詞已清除。", ephemeral=True)
+        await interaction.response.send_message(
+            tr(self.lang, "CONFIG_PROMPT_CLEARED"),
+            ephemeral=True,
+        )
 
 
 class DummyToggleButton(discord.ui.Button):
     """Owner-only toggle for offline dummy mode (if enabled by env flag)."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, enabled: bool) -> None:
-        label = f"Dummy Mode: {'ON' if enabled else 'OFF'}"
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, enabled: bool, lang: str) -> None:
+        label = tr(lang, "CONFIG_BTN_DUMMY_ON") if enabled else tr(lang, "CONFIG_BTN_DUMMY_OFF")
         style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
         super().__init__(label=label, style=style)
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         new_state = not await self.cog.config.use_dummy_api()
         await self.cog.config.use_dummy_api.set(new_state)
         await self.cog._init_client()
 
-        self.label = f"Dummy Mode: {'ON' if new_state else 'OFF'}"
+        self.label = (
+            tr(self.lang, "CONFIG_BTN_DUMMY_ON")
+            if new_state
+            else tr(self.lang, "CONFIG_BTN_DUMMY_OFF")
+        )
         self.style = (
             discord.ButtonStyle.success if new_state else discord.ButtonStyle.secondary
         )
@@ -195,11 +236,13 @@ class DummyToggleButton(discord.ui.Button):
                 child.options = new_options
                 break
 
-        owner_mode = getattr(self.view, "owner_mode", True)
-        embed = await self.cog._build_config_embed(self.ctx, owner_mode, new_state)
+            owner_mode = getattr(self.view, "owner_mode", True)
+            embed = await self.cog._build_config_embed(self.ctx, owner_mode, new_state, self.lang)
         await interaction.response.edit_message(embed=embed, view=self.view)
         await interaction.followup.send(
-            "✅ Dummy API mode 已啟用。" if new_state else "✅ Dummy API mode 已關閉。",
+            tr(self.lang, "CONFIG_DUMMY_ENABLED_OK")
+            if new_state
+            else tr(self.lang, "CONFIG_DUMMY_DISABLED_OK"),
             ephemeral=True,
         )
 

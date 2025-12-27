@@ -8,6 +8,7 @@ from typing import List, Optional, TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
+from ..i18n import tr
 from .common import CloseMenuButton, preview_content
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -20,10 +21,14 @@ class SwitchConversationSelect(discord.ui.Select):
     """Dropdown to switch the active conversation."""
 
     def __init__(
-        self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        options: List[discord.SelectOption],
+        lang: str,
     ) -> None:
         super().__init__(
-            placeholder="Switch Conversation / 切換對話",
+            placeholder=tr(lang, "CONV_SWITCH_PLACEHOLDER"),
             min_values=1,
             max_values=1,
             options=options,
@@ -31,6 +36,7 @@ class SwitchConversationSelect(discord.ui.Select):
         )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         conv_id = self.values[0]
@@ -44,10 +50,14 @@ class DeleteConversationSelect(discord.ui.Select):
     """Dropdown to delete a conversation."""
 
     def __init__(
-        self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        options: List[discord.SelectOption],
+        lang: str,
     ) -> None:
         super().__init__(
-            placeholder="Delete Conversation / 刪除對話",
+            placeholder=tr(lang, "CONV_DELETE_PLACEHOLDER"),
             min_values=1,
             max_values=1,
             options=options,
@@ -55,6 +65,7 @@ class DeleteConversationSelect(discord.ui.Select):
         )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         conv_id = self.values[0]
@@ -64,7 +75,8 @@ class DeleteConversationSelect(discord.ui.Select):
         success = await self.cog._delete_conversation(self.ctx.author.id, conv_id)
         if not success:
             await interaction.response.send_message(
-                f"❌ Could not delete **{title}**.", ephemeral=True
+                tr(self.lang, "CONV_DELETE_FAILED", title=title),
+                ephemeral=True,
             )
             return
 
@@ -73,7 +85,8 @@ class DeleteConversationSelect(discord.ui.Select):
             await self.cog._set_active_conversation(self.ctx.author.id, "default")
 
         await interaction.response.send_message(
-            f"✅ Conversation **{title}** deleted.", ephemeral=True
+            tr(self.lang, "CONV_DELETED_OK", title=title),
+            ephemeral=True,
         )
         if isinstance(self.view, ConversationMenuView):
             await self.view.refresh_content(interaction, update_response=True)
@@ -82,33 +95,42 @@ class DeleteConversationSelect(discord.ui.Select):
 class ClearHistoryButton(discord.ui.Button):
     """Button to clear the active conversation's message history."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
-            label="Clear Chat History",
+            label=tr(lang, "CONV_BTN_CLEAR_HISTORY"),
             style=discord.ButtonStyle.danger,
             emoji="🧹",
             row=2,
         )
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if not self.cog.conversation_manager:
-            await interaction.response.send_message("❌ System not initialized.", ephemeral=True)
+            await interaction.response.send_message(
+                tr(self.lang, "CONV_SYSTEM_NOT_INITIALIZED"),
+                ephemeral=True,
+            )
             return
 
         active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
         conv = await self.cog._get_conversation(self.ctx.author.id, active_conv_id)
         if not conv:
             await interaction.response.send_message(
-                "⚠️ No active conversation found.", ephemeral=True
+                tr(self.lang, "CONV_NO_ACTIVE"),
+                ephemeral=True,
             )
             return
 
         updated_conv = self.cog.conversation_manager.clear_messages(conv)
         await self.cog._save_conversation(self.ctx.author.id, active_conv_id, updated_conv)
         await interaction.response.send_message(
-            f"✅ History cleared for **{updated_conv.get('title', active_conv_id)}**.",
+            tr(
+                self.lang,
+                "CONV_HISTORY_CLEARED_OK",
+                title=updated_conv.get("title", active_conv_id),
+            ),
             ephemeral=True,
         )
 
@@ -119,8 +141,14 @@ class ClearHistoryButton(discord.ui.Button):
 class RefreshButton(discord.ui.Button):
     """Button to refresh the conversation menu embed/options."""
 
-    def __init__(self) -> None:
-        super().__init__(label="Refresh", style=discord.ButtonStyle.secondary, emoji="🔄", row=2)
+    def __init__(self, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONV_BTN_REFRESH"),
+            style=discord.ButtonStyle.secondary,
+            emoji="🔄",
+            row=2,
+        )
+        self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
@@ -131,16 +159,18 @@ class RefreshButton(discord.ui.Button):
 class ConversationMenuView(discord.ui.View):
     """Interactive menu to switch, delete, and clear conversations."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context) -> None:
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
+        self.lang = lang
         self.message: Optional[discord.Message] = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.author.id:
             await interaction.response.send_message(
-                "This menu is restricted to the triggerer.", ephemeral=True
+                tr(self.lang, "RESTRICTED_MENU"),
+                ephemeral=True,
             )
             return False
         return True
@@ -148,7 +178,13 @@ class ConversationMenuView(discord.ui.View):
     async def build_options(self) -> tuple[List[discord.SelectOption], str]:
         """Return (options, active_conversation_id)."""
         if not self.cog.conversation_manager:
-            return [discord.SelectOption(label="Default", value="default", default=True)], "default"
+            return [
+                discord.SelectOption(
+                    label=tr(self.lang, "CONV_DEFAULT_LABEL"),
+                    value="default",
+                    default=True,
+                )
+            ], "default"
 
         conversations = await self.cog.config.user(self.ctx.author).conversations()
         active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
@@ -164,7 +200,11 @@ class ConversationMenuView(discord.ui.View):
             sorted_convs.sort(key=lambda x: x[1].get("created_at", 0), reverse=True)
             for conv_id, data in sorted_convs[:25]:
                 title = data.get("title", conv_id)
-                desc = f"Messages: {len(data.get('messages', []))}"
+                desc = tr(
+                    self.lang,
+                    "CONV_OPTION_DESC",
+                    count=len(data.get("messages", [])),
+                )
                 is_active = conv_id == active_conv_id
                 emoji = "🟢" if is_active else "💬"
                 options.append(
@@ -178,7 +218,14 @@ class ConversationMenuView(discord.ui.View):
                 )
 
         if not options:
-            options.append(discord.SelectOption(label="Default", value="default", default=True, emoji="🟢"))
+            options.append(
+                discord.SelectOption(
+                    label=tr(self.lang, "CONV_DEFAULT_LABEL"),
+                    value="default",
+                    default=True,
+                    emoji="🟢",
+                )
+            )
 
         return options, active_conv_id
 
@@ -191,7 +238,7 @@ class ConversationMenuView(discord.ui.View):
         self.clear_items()
 
         options, active_id = await self.build_options()
-        self.add_item(SwitchConversationSelect(self.cog, self.ctx, options))
+        self.add_item(SwitchConversationSelect(self.cog, self.ctx, options, self.lang))
 
         delete_options = [
             discord.SelectOption(
@@ -203,11 +250,11 @@ class ConversationMenuView(discord.ui.View):
             for opt in options
         ]
         if delete_options:
-            self.add_item(DeleteConversationSelect(self.cog, self.ctx, delete_options))
+            self.add_item(DeleteConversationSelect(self.cog, self.ctx, delete_options, self.lang))
 
-        self.add_item(ClearHistoryButton(self.cog, self.ctx))
-        self.add_item(RefreshButton())
-        self.add_item(CloseMenuButton())
+        self.add_item(ClearHistoryButton(self.cog, self.ctx, self.lang))
+        self.add_item(RefreshButton(self.lang))
+        self.add_item(CloseMenuButton(label=tr(self.lang, "CLOSE_MENU")))
 
         conv = await self.cog._get_conversation(self.ctx.author.id, active_id)
         if not conv:
@@ -216,13 +263,13 @@ class ConversationMenuView(discord.ui.View):
         title = conv.get("title", active_id)
         msg_count = len(conv.get("messages", []))
         embed = discord.Embed(
-            title="💬 Conversation Management",
-            description="Use the menu below to switch, clear, or delete conversations.",
+            title=tr(self.lang, "CONV_TITLE"),
+            description=tr(self.lang, "CONV_DESC"),
             color=discord.Color.gold(),
         )
         embed.add_field(
-            name="Active Conversation",
-            value=f"**{title}**\nID: `{active_id}`\nMessages: {msg_count}",
+            name=tr(self.lang, "CONV_FIELD_ACTIVE"),
+            value=f"**{title}**\nID: `{active_id}`\n{tr(self.lang, 'CONV_OPTION_DESC', count=msg_count)}",
             inline=False,
         )
 
@@ -232,11 +279,23 @@ class ConversationMenuView(discord.ui.View):
             preview_lines = []
             for msg in recent:
                 role_icon = "👤" if msg.get("role") == "user" else "🤖"
-                content = preview_content(msg.get("content"))
+                content = preview_content(
+                    msg.get("content"),
+                    empty_label=tr(self.lang, "CONV_EMPTY"),
+                    non_text_label=tr(self.lang, "CONV_NON_TEXT"),
+                )
                 preview_lines.append(f"{role_icon} {content}")
-            embed.add_field(name="Recent Context", value="\n".join(preview_lines), inline=False)
+            embed.add_field(
+                name=tr(self.lang, "CONV_FIELD_RECENT"),
+                value="\n".join(preview_lines),
+                inline=False,
+            )
         else:
-            embed.add_field(name="Recent Context", value="*Empty*", inline=False)
+            embed.add_field(
+                name=tr(self.lang, "CONV_FIELD_RECENT"),
+                value=tr(self.lang, "CONV_EMPTY"),
+                inline=False,
+            )
 
         if not interaction:
             return embed
