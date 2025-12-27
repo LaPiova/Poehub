@@ -19,13 +19,14 @@ import discord
 from redbot.core import Config, commands as red_commands
 from redbot.core.bot import Red
 
-from .api_client import DummyPoeClient, PoeClient
+from .api_client import get_client, BaseLLMClient
 from .conversation_manager import ConversationManager
 from .encryption import EncryptionHelper, generate_key
 from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
 from .ui.language_view import LanguageView
+from .ui.provider_view import ProviderConfigView
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -65,11 +66,20 @@ class PoeHub(red_commands.Cog):
         
         # Default configuration
         default_global = {
+            "active_provider": "poe",
+            "provider_keys": {},  # Dict[str, str] mapping provider -> api_key
+            "provider_urls": {
+                "poe": "https://api.poe.com/v1",
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com",
+                "openrouter": "https://openrouter.ai/api/v1",
+            },
+            # Legacy fields kept for migration/fallback
             "api_key": None,
-            "encryption_key": None,
             "base_url": "https://api.poe.com/v1",
-            "default_system_prompt": None,  # Default system prompt set by bot owner
-            "use_dummy_api": False  # Allow offline debugging without Poe API key
+            
+            "default_system_prompt": None,
+            "use_dummy_api": False
         }
         
         default_user = {
@@ -83,7 +93,7 @@ class PoeHub(red_commands.Cog):
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
         
-        self.client: Optional[Union[PoeClient, DummyPoeClient]] = None
+        self.client: Optional[BaseLLMClient] = None
         self.conversation_manager: Optional[ConversationManager] = None
         self.encryption: Optional[EncryptionHelper] = None
         
@@ -124,34 +134,52 @@ class PoeHub(red_commands.Cog):
             log.exception("Error initializing PoeHub")
     
     async def _init_client(self) -> None:
-        """Initialize the Poe client."""
+        """Initialize the LLM client based on configuration."""
         self.client = None
+        
+        # Check dummy mode
         use_dummy = await self.config.use_dummy_api()
         if use_dummy and not self.allow_dummy_mode:
-            # Ensure persisted config stays in sync with release builds
             await self.config.use_dummy_api.set(False)
-            log.info(
-                "Dummy API mode is disabled in this release build; falling back to live client."
-            )
             use_dummy = False
+            
         if use_dummy:
-            self.client = DummyPoeClient()
-            log.info("Dummy PoeHub client initialized (offline mode)")
+            self.client = get_client("dummy", "dummy")
+            log.info("Initialized Dummy Provider (Offline)")
             return
 
-        api_key = await self.config.api_key()
-        base_url = await self.config.base_url()
+        # Get configuration
+        active_provider = await self.config.active_provider()
+        provider_keys = await self.config.provider_keys()
+        provider_urls = await self.config.provider_urls()
         
+        # Resolve API Key
+        api_key = provider_keys.get(active_provider)
+        # Fallback to legacy key if not found and provider is Poe (migration path)
+        if not api_key:
+            legacy_key = await self.config.api_key()
+            if legacy_key and active_provider == "poe":
+                api_key = legacy_key
+                # Auto-migrate
+                provider_keys["poe"] = legacy_key
+                await self.config.provider_keys.set(provider_keys)
+        
+        # Resolve Base URL
+        base_url = provider_urls.get(active_provider)
+        # Fallback to legacy URL
+        if not base_url:
+             legacy_url = await self.config.base_url()
+             if legacy_url and active_provider == "poe":
+                 base_url = legacy_url
+
         if api_key:
-            self.client = PoeClient(api_key=api_key, base_url=base_url)
-            log.info("PoeHub API client initialized")
+            try:
+                self.client = get_client(active_provider, api_key, base_url)
+                log.info(f"Initialized client for provider: {active_provider}")
+            except Exception as e:
+                log.error(f"Failed to initialize client for {active_provider}: {e}")
         else:
-            warning = "No API key set. Use [p]poeapikey to set one"
-            if self.allow_dummy_mode:
-                warning += " or enable dummy mode."
-            else:
-                warning += "."
-            log.warning(warning)
+            log.warning(f"No API key found for active provider: {active_provider}")
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
         """Split text into Discord-safe chunks.
@@ -270,25 +298,27 @@ class PoeHub(red_commands.Cog):
             color=discord.Color.blurple(),
         )
         current_model = await self.config.user(ctx.author).model()
+        
+        # Determine effective provider for display
+        active_provider = await self.config.active_provider()
+        
         embed.add_field(
             name=tr(lang, "CONFIG_FIELD_MODEL"),
             value=f"`{current_model}`",
             inline=True,
         )
-
+        embed.add_field(
+            name="Provider",
+            value=f"`{active_provider}`",
+            inline=True,
+        )
+        
         user_prompt = await self.config.user(ctx.author).system_prompt()
         embed.add_field(
             name=tr(lang, "CONFIG_FIELD_PROMPT"),
             value=tr(lang, "CONFIG_PROMPT_SET") if user_prompt else tr(lang, "CONFIG_PROMPT_NOT_SET"),
             inline=True,
         )
-
-        if owner_mode and self.allow_dummy_mode:
-            embed.add_field(
-                name=tr(lang, "CONFIG_FIELD_DUMMY"),
-                value=tr(lang, "CONFIG_DUMMY_ON") if dummy_state else tr(lang, "CONFIG_DUMMY_OFF"),
-                inline=True,
-            )
 
         return embed
     
@@ -446,22 +476,101 @@ class PoeHub(red_commands.Cog):
     
     # --- Commands ---
 
-    @red_commands.command(name="poeapikey", aliases=["pkey"])
+    @red_commands.command(name="provider")
     @red_commands.is_owner()
-    async def set_api_key(self, ctx: red_commands.Context, api_key: str):
+    async def provider_menu(self, ctx: red_commands.Context):
+        """Open the interactive provider configuration menu."""
+        lang = await self._get_language(ctx.author.id)
+        
+        view = ProviderConfigView(self, ctx, lang)
+        
+        # Initial status embed
+        active = await self.config.active_provider()
+        dummy = await self.config.use_dummy_api()
+        
+        embed = discord.Embed(
+            title="Provider Configuration",
+            description="Select an AI provider and set your API key.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Active Provider", value=f"**{active}**", inline=True)
+        embed.add_field(name="Dummy Mode", value="ON" if dummy else "OFF", inline=True)
+        
+        # Check key
+        if active != "dummy":
+            keys = await self.config.provider_keys()
+            has_key = bool(keys.get(active))
+            embed.add_field(name="API Key Set", value="✅ Yes" if has_key else "❌ No", inline=True)
+
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    # Legacy command aliases kept for backward compatibility...
+    @red_commands.command(name="setprovider", hidden=True)
+    @red_commands.is_owner()
+    async def set_provider(self, ctx: red_commands.Context, provider: str):
         """
-        Set the Poe API key (Owner only)
-        Usage: [p]poeapikey <your_api_key>
+        Set the active AI provider (Legacy: use [p]provider menu instead).
         """
-        await self.config.api_key.set(api_key)
+        provider = provider.lower()
+        valid_providers = ["poe", "openai", "anthropic", "google", "deepseek", "openrouter", "dummy"]
+        
+        if provider not in valid_providers:
+            await ctx.send(f"❌ Invalid provider. Choose from: {', '.join(valid_providers)}")
+            return
+            
+        if provider == "dummy" and not self.allow_dummy_mode:
+             await ctx.send("❌ Dummy mode is not enabled in this build.")
+             return
+             
+        if provider == "dummy":
+            await self.config.use_dummy_api.set(True)
+        else:
+            await self.config.use_dummy_api.set(False)
+            
+        await self.config.active_provider.set(provider)
         await self._init_client()
         
+        msg = f"✅ Active provider set to **{provider}**."
+        
+        # Check if key needs to be set
+        if not self.client and provider != "dummy":
+             msg += f"\n⚠️ **Warning**: Client not initialized. You probably need to set an API key for {provider}.\nUse `[p]setapikey {provider} <key>`."
+        
+        await ctx.send(msg)
+
+    @red_commands.command(name="setapikey", aliases=["setkey"])
+    @red_commands.is_owner()
+    async def set_provider_key(self, ctx: red_commands.Context, provider: str, api_key: str):
+        """
+        Set the API key for a specific provider.
+        Usage: [p]setkey <provider> <key>
+        """
+        provider = provider.lower()
+        provider_keys = await self.config.provider_keys()
+        provider_keys[provider] = api_key
+        await self.config.provider_keys.set(provider_keys)
+        
+        # If setting key for active provider, re-init
+        active = await self.config.active_provider()
+        if active == provider:
+            await self._init_client()
+            
         try:
             await ctx.message.delete()
         except:
             pass
-        
-        await ctx.send("✅ API key has been set successfully! (Your message was deleted for security)")
+            
+        await ctx.send(f"✅ API key for **{provider}** updated successfully! (Message deleted)")
+
+    @red_commands.command(name="poeapikey", aliases=["pkey"])
+    @red_commands.is_owner()
+    async def set_api_key(self, ctx: red_commands.Context, api_key: str):
+        """
+        Set the Poe API key (Legacy alias).
+        Equivalent to: [p]setkey poe <key>
+        """
+        await self.set_provider_key(ctx, "poe", api_key)
 
     @red_commands.command(name="poedummymode", aliases=["pdummy", "dummy"])
     @red_commands.is_owner()
