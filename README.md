@@ -1,10 +1,11 @@
-# PoeHub - Red-DiscordBot Cog for Poe API
+# PoeHub - Red-DiscordBot Cog for LLM APIs
 
-A comprehensive Red-DiscordBot Cog that integrates with Poe's AI platform using OpenAI-compatible API endpoints.
+A comprehensive Red-DiscordBot Cog that integrates with **Poe**, **OpenAI**, **Anthropic (Claude)**, **Google (Gemini)**, **DeepSeek**, and **OpenRouter** APIs.
 
 ## Features
 
-- 🤖 **Multi-Model Support**: Switch between Claude, GPT-4, Gemini, and other AI models (50+ models dynamically fetched)
+- 🤖 **Multi-Provider Support**: Switch between Poe, OpenAI, Anthropic, Google Gemini, DeepSeek, and OpenRouter
+- 🔄 **Unified Interface**: Use one set of commands regardless of the backend provider
 - 💬 **Conversation Context**: AI remembers up to 50 messages per conversation, multiple conversations per user
 - 📝 **System Prompts**: Owner can set default prompt, users can set personal prompts (fully isolated per user)
 - 🔒 **Encrypted Data Storage**: All local data encrypted using Fernet encryption
@@ -15,15 +16,26 @@ A comprehensive Red-DiscordBot Cog that integrates with Poe's AI platform using 
 - 🌐 **Bilingual Help**: Full Traditional Chinese (繁體中文) support
 - 🔄 **Auto-Start**: Optional systemd service for automatic bot start on server reboot
 
+## Before You Start
+
+- ✅ **Discord Bot Token** – create a bot in the [Discord Developer Portal](https://discord.com/developers/applications), invite it to your server, and keep the token ready for `redbot-setup`.
+- 🔑 **Poe API Key** – required for live conversations. For local debugging without a key, set `POEHUB_ENABLE_DUMMY_MODE=1` first and then enable dummy mode with `[p]poedummymode on`.
+- 🐍 **Python 3.8.1–3.11** – Red-DiscordBot is incompatible with Python 3.12+. The deployment scripts create a compatible virtualenv automatically.
+- 💻 **Supported OS** – Ubuntu 22.04/24.04 (primary) or Arch Linux. Use the matching deployment script below.
+
 ## Installation
 
 ### Option 1: Automated Deployment (Recommended)
 
-Run the deployment script on a fresh Ubuntu server:
+Run the deployment script on a fresh system:
 
 ```bash
 cd ~/Poehub
+# Ubuntu / Debian-based
 ./deploy_poe_bot.sh
+
+# Arch Linux
+./deploy_poe_bot_on_arch.sh
 ```
 
 **Important:** Red-DiscordBot requires Python 3.8.1 to 3.11.x (NOT 3.12+). 
@@ -46,7 +58,7 @@ This will:
 ```bash
 python3 -m venv ~/.redenv
 source ~/.redenv/bin/activate
-pip install Red-DiscordBot openai cryptography
+pip install Red-DiscordBot openai anthropic google-generativeai cryptography
 ```
 
 2. **Set up Red-DiscordBot**:
@@ -72,7 +84,7 @@ Once the bot is running, configure it in Discord:
 
 1. **Add the custom cog path** (use absolute path):
 ```
-[p]addpath /home/ubuntu/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 ```
 *Note: Relative paths like ~/red-cogs are not supported*
 
@@ -81,10 +93,56 @@ Once the bot is running, configure it in Discord:
 [p]load poehub
 ```
 
-3. **Set your Poe API key** (bot owner only):
+3. **Set your Provider and API key** (bot owner only):
 ```
-[p]poeapikey <your_poe_api_key>
+[p]setprovider <poe|openai|anthropic|google|deepseek|openrouter>
+[p]setapikey <provider> <your_key>
 ```
+Example:
+```
+[p]setprovider openai
+[p]setapikey openai sk-...
+```
+
+4. **Open the interactive config panel**:
+```
+[p]poeconfig
+```
+Use the dropdown + buttons to change your default model, set/clear personal prompts, or (if you're the owner) toggle dummy mode without memorizing every text command.
+
+> Dummy controls only appear after you set `POEHUB_ENABLE_DUMMY_MODE=1`. By default the flag is `0`, so release builds stay clean until you opt in.
+
+## Offline Dummy Mode (No API Key)
+
+Need to debug commands before you have a real API key? After setting `POEHUB_ENABLE_DUMMY_MODE=1`, enable the dummy client:
+
+```
+[p]setprovider dummy
+```
+
+PoeHub will return local stub replies while the rest of the workflow (conversations, prompts, permissions) stays identical. Switch back to a live API when you're ready:
+
+```
+[p]setprovider poe
+```
+
+Use this workflow to validate deployments, Discord permissions, and data storage without touching the live Poe service.
+
+### Enabling Dummy Mode (Opt-in)
+
+Dummy mode is hidden by default (`POEHUB_ENABLE_DUMMY_MODE=0`). To expose the offline workflow on a dev box, set the variable before launching Red:
+
+```bash
+export POEHUB_ENABLE_DUMMY_MODE=1  # or add Environment=POEHUB_ENABLE_DUMMY_MODE=1 to your systemd unit
+./start_bot.sh
+```
+
+Once enabled:
+- `[p]poedummymode` and the config button appear for the bot owner
+- The cog lets you choose between live Poe API and the local stub
+- Help embeds/docs mention the dummy commands
+
+Set `POEHUB_ENABLE_DUMMY_MODE=0` (or unset it) again when shipping to another server so users only see the live workflow.
 
 ## Usage
 
@@ -198,6 +256,13 @@ Sets a default prompt that all users will use unless they set their own.
 ```
 Removes the default system prompt.
 
+#### Toggle Dummy Mode (Owner Only, if enabled)
+```
+[p]poedummymode on
+[p]poedummymode off
+```
+Quickly switch between the offline dummy client and the real Poe API. This command is available only when `POEHUB_ENABLE_DUMMY_MODE=1`.
+
 ### DM Support
 
 Simply send a message to the bot via DM (without using a command prefix) and it will respond automatically!
@@ -225,9 +290,15 @@ Simply send a message to the bot via DM (without using a command prefix) and it 
 
 ## API Key
 
-Get your Poe API key from: https://poe.com/api_key
+Get your API keys from the respective provider:
+- **Poe**: https://poe.com/api_key
+- **OpenAI**: https://platform.openai.com/api-keys
+- **Anthropic**: https://console.anthropic.com/
+- **Google Gemini**: https://aistudio.google.com/app/apikey
+- **DeepSeek**: https://platform.deepseek.com/
+- **OpenRouter**: https://openrouter.ai/keys
 
-The bot uses the OpenAI-compatible endpoint at `https://api.poe.com/v1`
+The bot uses the standard OpenAI client for Poe, DeepSeek, and OpenRouter.
 
 ## Security
 
@@ -239,12 +310,14 @@ The bot uses the OpenAI-compatible endpoint at `https://api.poe.com/v1`
 
 ```
 Poehub/
-├── poehub.py               # Main cog logic
-├── api_client.py           # API interaction layer
-├── conversation_manager.py # State and history management
-├── encryption.py           # Encryption helper class
-├── __init__.py             # Package initialization
-├── info.json               # Cog metadata
+├── src/poehub/             # Cog package (synced to $HOME/red-cogs/poehub/)
+│   ├── poehub.py           # Main cog logic
+│   ├── api_client.py       # API interaction layer
+│   ├── conversation_manager.py  # State and history management
+│   ├── encryption.py       # Encryption helper class
+│   ├── ui/                 # Discord UI views (dropdowns/buttons)
+│   ├── __init__.py         # Package initialization
+│   └── info.json           # Cog metadata
 ├── requirements.txt        # Python dependencies
 ├── deploy_poe_bot.sh       # Automated deployment script
 ├── start_bot.sh            # Bot startup script
@@ -260,27 +333,27 @@ Poehub/
 
 ### Background Mode (Screen)
 ```bash
-screen -dmS poebot bash -c "source ~/.redenv/bin/activate && redbot PoeBot"
-screen -r poebot  # To attach to the session
+screen -dmS ${POEHUB_SCREEN_NAME:-poebot} bash -c "source ~/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+screen -r ${POEHUB_SCREEN_NAME:-poebot}  # To attach to the session
 ```
 
 ### As a Systemd Service
 
 1. Copy the service file:
 ```bash
-sudo cp ~/poebot.service /etc/systemd/system/
+sudo cp ~/${POEHUB_SERVICE_NAME:-poebot}.service /etc/systemd/system/
 ```
 
 2. Enable and start:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable poebot.service
-sudo systemctl start poebot.service
+sudo systemctl enable ${POEHUB_SERVICE_NAME:-poebot}.service
+sudo systemctl start ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 
 3. Check status:
 ```bash
-sudo systemctl status poebot.service
+sudo systemctl status ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 
 ## Troubleshooting
@@ -304,6 +377,8 @@ sudo systemctl status poebot.service
 - Red-DiscordBot 3.5.0+
 - discord.py 2.0.0+
 - openai 1.0.0+
+- anthropic 0.3.0+
+- google-generativeai 0.3.0+
 - cryptography 41.0.0+
 
 ## License

@@ -5,29 +5,34 @@
 # Run this after making changes to sync them to the bot
 ###############################################################################
 
-SOURCE_DIR="$HOME/Poehub"
+SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+COG_SOURCE_DIR="$SOURCE_DIR/src/poehub"
 TARGET_DIR="$HOME/red-cogs/poehub"
 
+set -euo pipefail
+
 echo "🔄 Syncing PoeHub files..."
+echo "Source: $SOURCE_DIR"
+echo "Target: $TARGET_DIR"
 echo ""
 
-# Create target directory if it doesn't exist
-mkdir -p "$TARGET_DIR"
+if [ ! -d "$COG_SOURCE_DIR" ]; then
+  echo "❌ Could not find cog source directory: $COG_SOURCE_DIR"
+  echo "Expected layout: $SOURCE_DIR/src/poehub/"
+  exit 1
+fi
 
-# Copy files
-echo "Copying files from $SOURCE_DIR to $TARGET_DIR"
-cp "$SOURCE_DIR/poehub.py" "$TARGET_DIR/"
-cp "$SOURCE_DIR/api_client.py" "$TARGET_DIR/"
-cp "$SOURCE_DIR/conversation_manager.py" "$TARGET_DIR/"
-cp "$SOURCE_DIR/encryption.py" "$TARGET_DIR/"
-cp "$SOURCE_DIR/__init__.py" "$TARGET_DIR/"
-cp "$SOURCE_DIR/info.json" "$TARGET_DIR/"
+mkdir -p "$HOME/red-cogs"
+rm -rf "$TARGET_DIR"
+
+echo "Copying cog package from $COG_SOURCE_DIR to $TARGET_DIR"
+cp -R "$COG_SOURCE_DIR" "$TARGET_DIR"
 
 echo ""
 echo "✅ Files synced successfully!"
 echo ""
 echo "Files in $TARGET_DIR:"
-ls -lh "$TARGET_DIR"/*.py "$TARGET_DIR"/*.json 2>/dev/null
+find "$TARGET_DIR" -maxdepth 2 -type f \( -name "*.py" -o -name "*.json" \) -print 2>/dev/null || true
 echo ""
 echo "📝 Next steps in Discord:"
 echo ""

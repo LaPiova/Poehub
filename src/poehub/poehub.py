@@ -1,26 +1,41 @@
-"""
-PoeHub - Red-DiscordBot Cog for Poe API Integration
-Uses OpenAI-compatible API endpoint to communicate with Poe
+"""PoeHub - Red-DiscordBot cog for Poe API integration.
+
+PoeHub connects to Poe's OpenAI-compatible endpoint and provides:
+- multi-model chat
+- encrypted per-user conversation storage
+- image attachments (OpenAI vision format)
+- optional DM/private mode
 """
 
-import discord
-from discord.ext import commands
-from redbot.core import commands as red_commands, Config
-from redbot.core.bot import Red
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any
+import os
 import time
+from typing import Any, Dict, List, Optional, Set, Union
 
-# Handle imports
-try:
-    from .encryption import EncryptionHelper, generate_key
-    from .api_client import PoeClient
-    from .conversation_manager import ConversationManager
-except ImportError:
-    from encryption import EncryptionHelper, generate_key
-    from api_client import PoeClient
-    from conversation_manager import ConversationManager
+import discord
+from redbot.core import Config, commands as red_commands
+from redbot.core.bot import Red
+
+from .api_client import get_client, BaseLLMClient
+from .conversation_manager import ConversationManager
+from .encryption import EncryptionHelper, generate_key
+from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
+from .ui.config_view import PoeConfigView
+from .ui.conversation_view import ConversationMenuView
+from .ui.language_view import LanguageView
+from .ui.provider_view import ProviderConfigView
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    """Return True if the env var is set to a truthy value."""
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+ALLOW_DUMMY_MODE = _env_flag("POEHUB_ENABLE_DUMMY_MODE", "0")
 
 
 log = logging.getLogger("red.poehub")
@@ -47,34 +62,58 @@ class PoeHub(red_commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=1234567890, force_registration=True)
+        self.allow_dummy_mode = ALLOW_DUMMY_MODE
         
         # Default configuration
         default_global = {
+            "active_provider": "poe",
+            "provider_keys": {},  # Dict[str, str] mapping provider -> api_key
+            "provider_urls": {
+                "poe": "https://api.poe.com/v1",
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com",
+                "openrouter": "https://openrouter.ai/api/v1",
+            },
+            # Legacy fields kept for migration/fallback
             "api_key": None,
-            "encryption_key": None,
             "base_url": "https://api.poe.com/v1",
-            "default_system_prompt": None  # Default system prompt set by bot owner
+            
+            "default_system_prompt": None,
+            "use_dummy_api": False
         }
         
         default_user = {
             "model": "Claude-3.5-Sonnet",
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
-            "system_prompt": None  # User's custom system prompt (overrides default)
+            "system_prompt": None,  # User's custom system prompt (overrides default)
+            "language": LANG_EN,  # Output language for menus/help
         }
         
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
         
-        self.client: Optional[PoeClient] = None
+        self.client: Optional[BaseLLMClient] = None
         self.conversation_manager: Optional[ConversationManager] = None
         self.encryption: Optional[EncryptionHelper] = None
         
         # Initialize encryption on load
         asyncio.create_task(self._initialize())
+
+    async def _get_language(self, user_id: int) -> str:
+        """Return the user's language code."""
+        lang = await self.config.user_from_id(user_id).language()
+        if lang in SUPPORTED_LANGS:
+            return lang
+        return LANG_EN
+
+    async def _t(self, user_id: int, key: str, **kwargs: object) -> str:
+        """Translate a string key for a specific user."""
+        lang = await self._get_language(user_id)
+        return tr(lang, key, **kwargs)
     
-    async def _initialize(self):
-        """Initialize encryption, conversation manager and API client"""
+    async def _initialize(self) -> None:
+        """Initialize encryption, conversation manager, and API client."""
         try:
             # Check for encryption key
             encryption_key = await self.config.encryption_key()
@@ -91,24 +130,66 @@ class PoeHub(red_commands.Cog):
             # Initialize API client if key exists
             await self._init_client()
             
-        except Exception as e:
-            log.error(f"Error initializing PoeHub: {e}", exc_info=True)
+        except Exception:
+            log.exception("Error initializing PoeHub")
     
-    async def _init_client(self):
-        """Initialize the Poe client"""
-        api_key = await self.config.api_key()
-        base_url = await self.config.base_url()
+    async def _init_client(self) -> None:
+        """Initialize the LLM client based on configuration."""
+        self.client = None
         
+        # Check dummy mode
+        use_dummy = await self.config.use_dummy_api()
+        if use_dummy and not self.allow_dummy_mode:
+            await self.config.use_dummy_api.set(False)
+            use_dummy = False
+            
+        if use_dummy:
+            self.client = get_client("dummy", "dummy")
+            log.info("Initialized Dummy Provider (Offline)")
+            return
+
+        # Get configuration
+        active_provider = await self.config.active_provider()
+        provider_keys = await self.config.provider_keys()
+        provider_urls = await self.config.provider_urls()
+        
+        # Resolve API Key
+        api_key = provider_keys.get(active_provider)
+        # Fallback to legacy key if not found and provider is Poe (migration path)
+        if not api_key:
+            legacy_key = await self.config.api_key()
+            if legacy_key and active_provider == "poe":
+                api_key = legacy_key
+                # Auto-migrate
+                provider_keys["poe"] = legacy_key
+                await self.config.provider_keys.set(provider_keys)
+        
+        # Resolve Base URL
+        base_url = provider_urls.get(active_provider)
+        # Fallback to legacy URL
+        if not base_url:
+             legacy_url = await self.config.base_url()
+             if legacy_url and active_provider == "poe":
+                 base_url = legacy_url
+
         if api_key:
-            self.client = PoeClient(api_key=api_key, base_url=base_url)
-            log.info("PoeHub API client initialized")
+            try:
+                self.client = get_client(active_provider, api_key, base_url)
+                log.info(f"Initialized client for provider: {active_provider}")
+            except Exception as e:
+                log.error(f"Failed to initialize client for {active_provider}: {e}")
         else:
-            log.warning("No API key set. Use [p]poeapikey to set one.")
+            log.warning(f"No API key found for active provider: {active_provider}")
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
-        """
-        Split a message into chunks that fit Discord's 2000 character limit.
-        Attempts to split at natural boundaries.
+        """Split text into Discord-safe chunks.
+
+        Args:
+            content: Full content to split.
+            max_length: Maximum chunk length. (Discord hard limit is 2000.)
+
+        Returns:
+            A list of chunks in send order.
         """
         if len(content) <= max_length:
             return [content]
@@ -153,7 +234,7 @@ class PoeHub(red_commands.Cog):
         return chunks
     
     async def _get_system_prompt(self, user_id: int) -> Optional[str]:
-        """Get the effective system prompt for a user"""
+        """Return the effective system prompt for a user."""
         user = discord.Object(id=user_id)
         
         # Check for user's personal prompt first
@@ -163,6 +244,83 @@ class PoeHub(red_commands.Cog):
         
         # Fall back to default prompt
         return await self.config.default_system_prompt()
+
+    async def _build_model_select_options(self) -> List[discord.SelectOption]:
+        """Build dropdown options for the interactive config panel."""
+        fallback_models = [
+            "Claude-Sonnet-4.5",
+            "GPT-5.2-Pro",
+            "Gemini-3-Pro",
+            "Claude-Opus-4.5",
+            "Claude-3.5-Sonnet",
+            "GPT-4o",
+            "o1-preview",
+            "Gemini-1.5-Pro",
+            "Llama-3.1-405B",
+            "Claude-3-Haiku",
+            "GPT-4",
+            "GPT-3.5-Turbo",
+        ]
+        options: List[discord.SelectOption] = []
+        seen: Set[str] = set()
+
+        if self.client:
+            try:
+                models = await self.client.get_models()
+                for model in models:
+                    model_id = model.get("id") if isinstance(model, dict) else None
+                    if not model_id or model_id in seen:
+                        continue
+                    seen.add(model_id)
+                    options.append(discord.SelectOption(label=model_id[:100], value=model_id))
+                    if len(options) >= 25:
+                        break
+            except Exception as exc:  # noqa: BLE001 - best-effort UI hydration
+                log.warning("Could not fetch live model list for config menu: %s", exc)
+
+        if not options:
+            for model_id in fallback_models:
+                options.append(discord.SelectOption(label=model_id, value=model_id))
+
+        return options[:25]
+
+    async def _build_config_embed(
+        self,
+        ctx: red_commands.Context,
+        owner_mode: bool,
+        dummy_state: bool,
+        lang: str,
+    ) -> discord.Embed:
+        """Create the status embed for the interactive config menu."""
+        embed = discord.Embed(
+            title=tr(lang, "CONFIG_TITLE"),
+            description=tr(lang, "CONFIG_DESC"),
+            color=discord.Color.blurple(),
+        )
+        current_model = await self.config.user(ctx.author).model()
+        
+        # Determine effective provider for display
+        active_provider = await self.config.active_provider()
+        
+        embed.add_field(
+            name=tr(lang, "CONFIG_FIELD_MODEL"),
+            value=f"`{current_model}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Provider",
+            value=f"`{active_provider}`",
+            inline=True,
+        )
+        
+        user_prompt = await self.config.user(ctx.author).system_prompt()
+        embed.add_field(
+            name=tr(lang, "CONFIG_FIELD_PROMPT"),
+            value=tr(lang, "CONFIG_PROMPT_SET") if user_prompt else tr(lang, "CONFIG_PROMPT_NOT_SET"),
+            inline=True,
+        )
+
+        return embed
     
     async def _stream_response(
         self, 
@@ -172,7 +330,7 @@ class PoeHub(red_commands.Cog):
         target_channel=None,
         save_to_conv=None
     ):
-        """Stream the AI response and update Discord message"""
+        """Stream the AI response and update Discord message."""
         if not self.client:
             await ctx.send("❌ API client not initialized. Please set your API key first.")
             return
@@ -229,9 +387,9 @@ class PoeHub(red_commands.Cog):
             else:
                 await response_msg.edit(content="❌ No response received from API.")
         
-        except Exception as e:
-            error_msg = f"❌ Error communicating with Poe API: {str(e)}"
-            log.error(error_msg, exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - surface errors to user
+            error_msg = f"❌ Error communicating with Poe API: {exc}"
+            log.exception("Error communicating with Poe API")
             await ctx.send(error_msg)
     
     # --- Conversation Management Methods (Refactored) ---
@@ -290,8 +448,14 @@ class PoeHub(red_commands.Cog):
         
         return conv
     
-    async def _add_message_to_conversation(self, user_id: int, conv_id: str, role: str, content: str):
-        """Add a message to a conversation"""
+    async def _add_message_to_conversation(
+        self,
+        user_id: int,
+        conv_id: str,
+        role: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> None:
+        """Add a message to a conversation."""
         if not self.conversation_manager:
             return
             
@@ -312,22 +476,168 @@ class PoeHub(red_commands.Cog):
     
     # --- Commands ---
 
-    @red_commands.command(name="poeapikey")
+    @red_commands.command(name="provider")
     @red_commands.is_owner()
-    async def set_api_key(self, ctx: red_commands.Context, api_key: str):
+    async def provider_menu(self, ctx: red_commands.Context):
+        """Open the interactive provider configuration menu."""
+        lang = await self._get_language(ctx.author.id)
+        
+        view = ProviderConfigView(self, ctx, lang)
+        
+        # Initial status embed
+        active = await self.config.active_provider()
+        dummy = await self.config.use_dummy_api()
+        
+        embed = discord.Embed(
+            title="Provider Configuration",
+            description="Select an AI provider and set your API key.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Active Provider", value=f"**{active}**", inline=True)
+        embed.add_field(name="Dummy Mode", value="ON" if dummy else "OFF", inline=True)
+        
+        # Check key
+        if active != "dummy":
+            keys = await self.config.provider_keys()
+            has_key = bool(keys.get(active))
+            embed.add_field(name="API Key Set", value="✅ Yes" if has_key else "❌ No", inline=True)
+
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    # Legacy command aliases kept for backward compatibility...
+    @red_commands.command(name="setprovider", hidden=True)
+    @red_commands.is_owner()
+    async def set_provider(self, ctx: red_commands.Context, provider: str):
         """
-        Set the Poe API key (Owner only)
-        Usage: [p]poeapikey <your_api_key>
+        Set the active AI provider (Legacy: use [p]provider menu instead).
         """
-        await self.config.api_key.set(api_key)
+        provider = provider.lower()
+        valid_providers = ["poe", "openai", "anthropic", "google", "deepseek", "openrouter", "dummy"]
+        
+        if provider not in valid_providers:
+            await ctx.send(f"❌ Invalid provider. Choose from: {', '.join(valid_providers)}")
+            return
+            
+        if provider == "dummy" and not self.allow_dummy_mode:
+             await ctx.send("❌ Dummy mode is not enabled in this build.")
+             return
+             
+        if provider == "dummy":
+            await self.config.use_dummy_api.set(True)
+        else:
+            await self.config.use_dummy_api.set(False)
+            
+        await self.config.active_provider.set(provider)
         await self._init_client()
         
+        msg = f"✅ Active provider set to **{provider}**."
+        
+        # Check if key needs to be set
+        if not self.client and provider != "dummy":
+             msg += f"\n⚠️ **Warning**: Client not initialized. You probably need to set an API key for {provider}.\nUse `[p]setapikey {provider} <key>`."
+        
+        await ctx.send(msg)
+
+    @red_commands.command(name="setapikey", aliases=["setkey"])
+    @red_commands.is_owner()
+    async def set_provider_key(self, ctx: red_commands.Context, provider: str, api_key: str):
+        """
+        Set the API key for a specific provider.
+        Usage: [p]setkey <provider> <key>
+        """
+        provider = provider.lower()
+        provider_keys = await self.config.provider_keys()
+        provider_keys[provider] = api_key
+        await self.config.provider_keys.set(provider_keys)
+        
+        # If setting key for active provider, re-init
+        active = await self.config.active_provider()
+        if active == provider:
+            await self._init_client()
+            
         try:
             await ctx.message.delete()
         except:
             pass
-        
-        await ctx.send("✅ API key has been set successfully! (Your message was deleted for security)")
+            
+        await ctx.send(f"✅ API key for **{provider}** updated successfully! (Message deleted)")
+
+    @red_commands.command(name="poeapikey", aliases=["pkey"])
+    @red_commands.is_owner()
+    async def set_api_key(self, ctx: red_commands.Context, api_key: str):
+        """
+        Set the Poe API key (Legacy alias).
+        Equivalent to: [p]setkey poe <key>
+        """
+        await self.set_provider_key(ctx, "poe", api_key)
+
+    @red_commands.command(name="poedummymode", aliases=["pdummy", "dummy"])
+    @red_commands.is_owner()
+    async def toggle_dummy_mode(self, ctx: red_commands.Context, *, state: Optional[str] = None):
+        """Enable/disable offline dummy API mode or show its status"""
+        if not self.allow_dummy_mode:
+            await ctx.send("❌ Dummy API mode is disabled in this release build.")
+            return
+        if state is None:
+            enabled = await self.config.use_dummy_api()
+            status_text = "ON" if enabled else "OFF"
+            await ctx.send(f"🔧 Dummy API mode is currently **{status_text}**.")
+            return
+
+        normalized = state.strip().lower()
+        if normalized in {"on", "true", "enable", "enabled", "1"}:
+            enabled = True
+        elif normalized in {"off", "false", "disable", "disabled", "0"}:
+            enabled = False
+        else:
+            await ctx.send("❌ Please specify `on` or `off`.")
+            return
+
+        await self.config.use_dummy_api.set(enabled)
+        await self._init_client()
+
+        if enabled:
+            await ctx.send("✅ Dummy API mode enabled. PoeHub will return local stub responses for debugging.")
+        else:
+            await ctx.send("✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`.")
+
+    @red_commands.command(name="poeconfig", aliases=["config", "menu"])
+    async def open_config_menu(self, ctx: red_commands.Context):
+        """Open the interactive configuration panel"""
+        lang = await self._get_language(ctx.author.id)
+        model_options = await self._build_model_select_options()
+        is_owner = await self.bot.is_owner(ctx.author)
+        dummy_state = await self.config.use_dummy_api() if (is_owner and self.allow_dummy_mode) else False
+
+        embed = await self._build_config_embed(ctx, is_owner, dummy_state, lang)
+
+        view = PoeConfigView(
+            cog=self,
+            ctx=ctx,
+            model_options=model_options,
+            owner_mode=is_owner,
+            dummy_state=dummy_state,
+            lang=lang,
+        )
+
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    @red_commands.command(name="language", aliases=["lang"])
+    async def language_menu(self, ctx: red_commands.Context):
+        """Open the language selection menu."""
+        lang = await self._get_language(ctx.author.id)
+        current = LANG_LABELS.get(lang, lang)
+        embed = discord.Embed(
+            title=tr(lang, "LANG_TITLE"),
+            description=tr(lang, "LANG_DESC"),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name=tr(lang, "LANG_CURRENT"), value=f"`{current}`", inline=False)
+        view = LanguageView(self, ctx, lang)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
     
     @red_commands.command(name="ask")
     async def ask(self, ctx: red_commands.Context, *, query: str):
@@ -357,11 +667,12 @@ class PoeHub(red_commands.Cog):
         if image_urls:
             content = self.client.format_image_message(query, image_urls)
             new_message = {"role": "user", "content": content}
+            # Save structured content with images to conversation history
+            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", content)
         else:
             new_message = {"role": "user", "content": query}
-        
-        # Add to conversation history
-        await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", query)
+            # Save text-only content to conversation history
+            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", query)
         
         # Combine history with new message
         messages = history + [new_message]
@@ -387,14 +698,14 @@ class PoeHub(red_commands.Cog):
         model = await self.config.user(ctx.author).model()
         await ctx.send(f"🤖 Your current model: **{model}**")
     
-    @red_commands.command(name="setdefaultprompt")
+    @red_commands.command(name="setdefaultprompt", aliases=["defprompt"])
     @red_commands.is_owner()
     async def set_default_prompt(self, ctx: red_commands.Context, *, prompt: str):
         """[OWNER ONLY] Set the default system prompt for all users"""
         await self.config.default_system_prompt.set(prompt)
         await ctx.send(f"✅ Default system prompt has been set!\n\nPrompt preview:\n```\n{prompt[:500]}{'...' if len(prompt) > 500 else ''}\n```")
     
-    @red_commands.command(name="cleardefaultprompt")
+    @red_commands.command(name="cleardefaultprompt", aliases=["clrdefprompt"])
     @red_commands.is_owner()
     async def clear_default_prompt(self, ctx: red_commands.Context):
         """[OWNER ONLY] Clear the default system prompt"""
@@ -443,7 +754,7 @@ class PoeHub(red_commands.Cog):
         await self.config.user(ctx.author).system_prompt.set(None)
         await ctx.send("✅ Your personal prompt has been cleared.")
     
-    @red_commands.command(name="purge_my_data")
+    @red_commands.command(name="purge_my_data", aliases=["purgeme", "resetme"])
     async def purge_user_data(self, ctx: red_commands.Context):
         """Delete all your stored data from the bot"""
         confirm_msg = await ctx.send(
@@ -461,7 +772,7 @@ class PoeHub(red_commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("❌ Confirmation timeout.")
     
-    @red_commands.command(name="clear_history", aliases=["clear_context", "reset_conv"])
+    @red_commands.command(name="clear_history", aliases=["clear"])
     async def clear_history(self, ctx: red_commands.Context):
         """Clear the history of the current conversation"""
         if not self.conversation_manager:
@@ -597,7 +908,7 @@ class PoeHub(red_commands.Cog):
         await self._delete_conversation(ctx.author.id, conv_id)
         await ctx.send(f"✅ Conversation **{title}** deleted successfully.")
     
-    @red_commands.command(name="currentconv")
+    @red_commands.command(name="currentconv", aliases=["curr", "cconv"])
     async def current_conversation(self, ctx: red_commands.Context):
         """Show details about your current conversation"""
         active_conv_id = await self._get_active_conversation_id(ctx.author.id)
@@ -627,8 +938,21 @@ class PoeHub(red_commands.Cog):
             embed.add_field(name="Recent Messages", value=history_text or "No messages yet", inline=False)
         
         await ctx.send(embed=embed)
+
+    @red_commands.command(name="conv", aliases=["conversations", "chatmenu"])
+    async def conversation_menu(self, ctx: red_commands.Context):
+        """Open the interactive conversation management menu"""
+        if not self.conversation_manager:
+            await ctx.send("❌ System not initialized.")
+            return
+
+        lang = await self._get_language(ctx.author.id)
+        view = ConversationMenuView(self, ctx, lang)
+        embed = await view.refresh_content(None)
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
     
-    @red_commands.command(name="listmodels")
+    @red_commands.command(name="listmodels", aliases=["lm", "models"])
     async def list_models(self, ctx: red_commands.Context, refresh: bool = False):
         """Show available AI models"""
         if not self.client:
@@ -702,7 +1026,7 @@ class PoeHub(red_commands.Cog):
         except Exception as e:
             await status_msg.edit(content=f"❌ Error: {str(e)}")
 
-    @red_commands.command(name="searchmodels")
+    @red_commands.command(name="searchmodels", aliases=["findm"])
     async def search_models(self, ctx: red_commands.Context, *, query: str):
         """Search for specific models"""
         if not self.client:
@@ -756,10 +1080,12 @@ class PoeHub(red_commands.Cog):
             if image_urls:
                 content = self.client.format_image_message(message.content, image_urls)
                 new_msg = {"role": "user", "content": content}
+                # Save structured content with images to conversation history
+                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", content)
             else:
                 new_msg = {"role": "user", "content": message.content}
-            
-            await self._add_message_to_conversation(message.author.id, active_conv_id, "user", message.content)
+                # Save text-only content to conversation history
+                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", message.content)
             messages = history + [new_msg]
             
             system_prompt = await self._get_system_prompt(message.author.id)
@@ -791,24 +1117,127 @@ class PoeHub(red_commands.Cog):
             else:
                 await response_msg.edit(content="❌ No response.")
                 
-        except Exception as e:
-            log.error(f"DM Error: {e}")
+        except Exception:
+            log.exception("DM handler error")
             await message.channel.send("❌ An error occurred.")
 
-    @red_commands.command(name="poehubhelp", aliases=["幫助", "说明"])
+    @red_commands.command(name="poehubhelp", aliases=["phelp"])
     async def poehub_help(self, ctx: red_commands.Context):
-        """Show bilingual help for PoeHub commands"""
-        # (Keeping the original help content abbreviated for brevity in this rewrite, 
-        # but in a real scenario I would keep the full text. 
-        # I'll restore the full text to ensure no regression.)
+        """Show help for PoeHub commands (localized)."""
+        lang = await self._get_language(ctx.author.id)
+        prefix = ctx.clean_prefix
+
+        def line(cmd: str, desc: str) -> str:
+            return tr(lang, "HELP_LINE", cmd=f"{prefix}{cmd}", desc=desc)
+
         embed = discord.Embed(
-            title="🤖 PoeHub Commands 指令說明",
-            description="Bilingual command reference 雙語指令參考",
-            color=discord.Color.blue()
+            title=tr(lang, "HELP_TITLE"),
+            description=tr(lang, "HELP_DESC"),
+            color=discord.Color.blurple(),
         )
-        embed.add_field(name="📝 Basic Commands 基本指令", value="**!ask**, **!setmodel**, **!mymodel**, **!listmodels**, **!searchmodels**", inline=False)
-        embed.add_field(name="💬 Conversation 對話", value="**!newconv**, **!switchconv**, **!listconv**, **!deleteconv**, **!clear_history**, **!delete_all_conversations**", inline=False)
-        embed.add_field(name="⚙️ Settings 設定", value="**!setprompt**, **!purge_my_data**", inline=False)
+
+        if lang == LANG_ZH_TW:
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CHAT"),
+                value="\n".join(
+                    [
+                        line("ask", "提問並取得回覆（支援圖片）。"),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_MODELS"),
+                value="\n".join(
+                    [
+                        line("setmodel", "設定你的預設模型。"),
+                        line("mymodel", "查看目前模型。"),
+                        line("listmodels", "列出可用模型。"),
+                        line("searchmodels", "搜尋模型。"),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CONV"),
+                value="\n".join(
+                    [
+                        line("conv", "開啟對話管理選單。"),
+                        line("newconv", "建立新對話。"),
+                        line("switchconv", "切換對話。"),
+                        line("listconv", "列出你的對話。"),
+                        line("deleteconv", "刪除對話。"),
+                        line("clear_history", "清除目前對話紀錄。"),
+                    ]
+                ),
+                inline=False,
+            )
+            settings_lines = [
+                line("config", "開啟設定選單。"),
+                line("language", "切換 PoeHub 語言。"),
+                line("setprompt", "設定個人提示詞。"),
+                line("clearprompt", "清除個人提示詞。"),
+                line("purge_my_data", "刪除你的資料。"),
+            ]
+            if self.allow_dummy_mode:
+                settings_lines.append(line("poedummymode", "切換 Dummy API（僅擁有者）。"))
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_SETTINGS"),
+                value="\n".join(settings_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CHAT"),
+                value="\n".join(
+                    [
+                        line("ask", "Ask a question (supports images)."),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_MODELS"),
+                value="\n".join(
+                    [
+                        line("setmodel", "Set your default model."),
+                        line("mymodel", "Show your current model."),
+                        line("listmodels", "List available models."),
+                        line("searchmodels", "Search models."),
+                    ]
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_CONV"),
+                value="\n".join(
+                    [
+                        line("conv", "Open the conversation menu."),
+                        line("newconv", "Create a new conversation."),
+                        line("switchconv", "Switch conversations."),
+                        line("listconv", "List your conversations."),
+                        line("deleteconv", "Delete a conversation."),
+                        line("clear_history", "Clear the active conversation history."),
+                    ]
+                ),
+                inline=False,
+            )
+            settings_lines = [
+                line("config", "Open the settings menu."),
+                line("language", "Switch PoeHub language."),
+                line("setprompt", "Set a personal system prompt."),
+                line("clearprompt", "Clear your personal prompt."),
+                line("purge_my_data", "Delete your stored data."),
+            ]
+            if self.allow_dummy_mode:
+                settings_lines.append(line("poedummymode", "Toggle Dummy API (owner only)."))
+            embed.add_field(
+                name=tr(lang, "HELP_SECTION_SETTINGS"),
+                value="\n".join(settings_lines),
+                inline=False,
+            )
+
+        embed.set_footer(text=tr(lang, "HELP_LANG_HINT", cmd=f"{prefix}lang"))
         await ctx.send(embed=embed)
 
 

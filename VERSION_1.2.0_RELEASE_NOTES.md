@@ -178,7 +178,7 @@ default_user = {
 
 - **New Commands**: 6 commands
 - **Code Changes**: ~160 lines added to `poehub.py`
-- **New Documentation**: `SYSTEM_PROMPTS_GUIDE.md` (comprehensive bilingual guide)
+- **New Documentation**: `SYSTEM_PROMPTS_GUIDE.md` (system prompt guide)
 - **Updated Files**: 4 files (poehub.py, README.md, CHANGELOG.md, 00-START_HERE.md)
 - **Total Commands**: 19 commands (up from 13)
 - **File Size**: 49 KB (1268 lines)

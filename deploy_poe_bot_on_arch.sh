@@ -1,11 +1,16 @@
 #!/bin/bash
 
 ###############################################################################
-# PoeHub Deployment Script for Ubuntu
+# PoeHub Deployment Script for Arch Linux
 # This script sets up a fresh Red-DiscordBot instance with the PoeHub cog
 ###############################################################################
 
 set -e  # Exit on error
+
+if ! command -v pacman &> /dev/null; then
+    echo "This script requires pacman. Please run it on Arch Linux or a derivative."
+    exit 1
+fi
 
 echo "=========================================="
 echo "  PoeHub Deployment Script"
@@ -39,16 +44,10 @@ print_error() {
 ###############################################################################
 # Step 1: System Preparation
 ###############################################################################
-print_status "Step 1: Updating system and installing dependencies..."
+print_status "Step 1: Updating system and installing dependencies via pacman..."
 
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git screen curl
-
-# Try to install Python 3.11 if not present (for Red-DiscordBot compatibility)
-if ! command -v python3.11 &> /dev/null; then
-    print_status "Installing Python 3.11 for Red-DiscordBot compatibility..."
-    sudo apt install -y python3.11 python3.11-venv python3.11-dev || true
-fi
+sudo pacman -Syu --noconfirm
+sudo pacman -S --needed --noconfirm python python-pip git screen curl
 
 print_success "System dependencies installed!"
 
@@ -57,29 +56,29 @@ print_success "System dependencies installed!"
 ###############################################################################
 print_status "Step 2: Creating virtual environment..."
 
-# Check Python version and use compatible version
-PYTHON_CMD="python3"
+# Determine compatible Python interpreter (Red-DiscordBot supports 3.8.1 - 3.11.x)
+PYTHON_CMD=""
 
-# Red-DiscordBot requires Python 3.8.1 to 3.11.x (not 3.12+)
 if command -v python3.11 &> /dev/null; then
     PYTHON_CMD="python3.11"
     print_status "Using Python 3.11 (Red-DiscordBot compatible)"
-elif command -v python3.10 &> /dev/null; then
-    PYTHON_CMD="python3.10"
-    print_status "Using Python 3.10 (Red-DiscordBot compatible)"
-elif command -v python3.9 &> /dev/null; then
-    PYTHON_CMD="python3.9"
-    print_status "Using Python 3.9 (Red-DiscordBot compatible)"
+elif command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
 else
-    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
-    PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-    PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-    
-    if [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -ge 12 ]; then
-        print_error "Python 3.12+ detected, but Red-DiscordBot requires Python 3.8.1 to 3.11.x"
-        print_error "Please install Python 3.11: sudo apt install python3.11 python3.11-venv"
-        exit 1
-    fi
+    print_error "No Python installation found. Install Python 3.11 (e.g., via \`yay -S python311\` or pyenv) and re-run this script."
+    exit 1
+fi
+
+PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+if [ "$PYTHON_MAJOR" -ne 3 ] || [ "$PYTHON_MINOR" -gt 11 ]; then
+    print_error "Python $PYTHON_VERSION detected, but Red-DiscordBot requires Python 3.8.1 through 3.11.x."
+    print_error "Install Python 3.11 (for Arch, use an AUR package such as python311 or a pyenv install) and re-run this script."
+    exit 1
 fi
 
 # Create venv if it doesn't exist
@@ -106,7 +105,7 @@ pip install --upgrade pip setuptools wheel
 pip install Red-DiscordBot
 
 # Install PoeHub dependencies
-pip install openai anthropic google-generativeai cryptography
+pip install openai cryptography
 
 print_success "All packages installed!"
 
@@ -125,10 +124,10 @@ else
     print_status "Running redbot-setup..."
     print_warning "You will need to provide your Discord bot token and make some choices."
     echo ""
-    
+
     # Run setup interactively
     redbot-setup
-    
+
     print_success "Red-DiscordBot setup complete!"
 fi
 
@@ -154,23 +153,75 @@ else
 fi
 
 ###############################################################################
-# Step 6: Install Startup Scripts
+# Step 6: Create Startup Script
 ###############################################################################
-print_status "Step 6: Installing startup scripts to $HOME..."
+print_status "Step 6: Creating startup script..."
 
-# Copy scripts if they exist
-for script in start_bot.sh start_bot_screen.sh install_service.sh; do
-    if [ -f "$SCRIPT_DIR/$script" ]; then
-        cp "$SCRIPT_DIR/$script" "$HOME/$script"
-        chmod +x "$HOME/$script"
-        print_success "Installed $script"
-    else
-        print_warning "Script $script not found in $SCRIPT_DIR"
-    fi
-done
+cat > "$HOME/start_bot.sh" <<'BOT_SCRIPT'
+#!/bin/bash
 
-print_success "Startup scripts installed!"
-print_status "You can now use ~/install_service.sh to setup the systemd service."
+# Activate virtual environment
+source "$HOME/.redenv/bin/activate"
+
+# Start the bot
+echo "Starting ${POEHUB_REDBOT_INSTANCE:-PoeBot}..."
+redbot "${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+
+# Deactivate venv on exit
+deactivate
+BOT_SCRIPT
+
+chmod +x "$HOME/start_bot.sh"
+print_success "Startup script created at ~/start_bot.sh"
+
+###############################################################################
+# Step 7: Create Screen Session Helper
+###############################################################################
+print_status "Step 7: Creating screen session helper..."
+
+cat > "$HOME/start_bot_screen.sh" <<'SCREEN_SCRIPT'
+#!/bin/bash
+
+# Start bot in a detached screen session
+screen -dmS "${POEHUB_SCREEN_NAME:-poebot}" bash -c "source $HOME/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+
+echo "Bot started in screen session 'poebot'"
+echo "To attach: screen -r poebot"
+echo "To detach: Press Ctrl+A then D"
+SCREEN_SCRIPT
+
+chmod +x "$HOME/start_bot_screen.sh"
+print_success "Screen helper created at ~/start_bot_screen.sh"
+
+###############################################################################
+# Step 8: Create Systemd Service (Optional)
+###############################################################################
+print_status "Step 8: Creating systemd service file..."
+
+SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
+cat > "$HOME/${SERVICE_NAME}.service" <<'SERVICE_UNIT'
+[Unit]
+Description=Red-DiscordBot - ${POEHUB_REDBOT_INSTANCE:-PoeBot} Instance
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME
+ExecStart=$HOME/.redenv/bin/redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_UNIT
+
+print_success "Systemd service file created at ~/${SERVICE_NAME}.service"
+print_warning "To install the service, run:"
+print_warning "  sudo cp ~/${SERVICE_NAME}.service /etc/systemd/system/"
+print_warning "  sudo systemctl daemon-reload"
+print_warning "  sudo systemctl enable ${SERVICE_NAME}.service"
+print_warning "  sudo systemctl start ${SERVICE_NAME}.service"
 
 ###############################################################################
 # Deployment Complete!
@@ -186,29 +237,32 @@ echo "1. Start the bot:"
 echo "   ${GREEN}~/start_bot.sh${NC}"
 echo "   OR use screen:"
 echo "   ${GREEN}~/start_bot_screen.sh${NC}"
+
 echo ""
 echo "2. In Discord, add the custom cog repository:"
 echo "   ${YELLOW}[p]addpath $COGS_DIR${NC}"
-echo ""
+
 echo "3. Load the PoeHub cog:"
 echo "   ${YELLOW}[p]load poehub${NC}"
-echo ""
+
 echo "4. Set your Poe API key (bot owner only):"
 echo "   ${YELLOW}[p]poeapikey <your_poe_api_key>${NC}"
-echo ""
+
 echo "5. Start using PoeHub:"
 echo "   ${YELLOW}[p]ask How does quantum computing work?${NC}"
 echo "   ${YELLOW}[p]setmodel GPT-4o${NC}"
 echo "   ${YELLOW}[p]privatemode${NC}"
+
 echo ""
 echo "=========================================="
 echo -e "${GREEN}For more help:${NC}"
 echo "  [p]help PoeHub"
 echo "  [p]listmodels"
-echo ""
+
 echo -e "${BLUE}Bot Directory:${NC} $HOME/.local/share/Red-DiscordBot/data/${INSTANCE_NAME}"
 echo -e "${BLUE}Cog Location:${NC} $COGS_DIR/poehub"
 echo -e "${BLUE}Startup Script:${NC} $HOME/start_bot.sh"
+
 echo ""
 echo "=========================================="
 echo -e "${GREEN}Happy chatting with Poe! 🤖${NC}"

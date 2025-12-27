@@ -50,11 +50,11 @@ To detach: Press `Ctrl+A` then `D`
 
 ### Step 4: Configure in Discord
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_POE_API_KEY
 ```
-*Note: Use absolute path (not ~/). Get your API key from https://poe.com/api_key*
+*Note: `addpath` requires an absolute path (not `~/`). Get your API key from https://poe.com/api_key*
 
 ### Step 4: Start Using!
 ```
@@ -116,12 +116,14 @@ Send images with your questions:
 Poehub/
 │
 ├── 🎯 Core Files (The Bot Itself)
-│   ├── poehub.py              # Main bot logic
-│   ├── api_client.py          # API interaction layer
-│   ├── conversation_manager.py # State management layer
-│   ├── encryption.py          # Security layer
-│   ├── __init__.py            # Package setup
-│   └── info.json              # Bot metadata
+│   ├── src/poehub/            # Cog package (this is what gets copied to Red)
+│   │   ├── poehub.py          # Main cog logic
+│   │   ├── api_client.py      # API interaction layer
+│   │   ├── conversation_manager.py  # State management layer
+│   │   ├── encryption.py      # Security layer
+│   │   ├── ui/                # Discord UI views (dropdowns/buttons)
+│   │   ├── __init__.py        # Package setup
+│   │   └── info.json          # Cog metadata
 │
 ├── ⚙️ Configuration
 │   ├── requirements.txt       # Python packages needed
@@ -167,7 +169,7 @@ screen -r poebot
 ```bash
 cd ~/Poehub
 # If using git: git pull
-cp poehub.py encryption.py __init__.py info.json ~/red-cogs/poehub/
+./sync_to_red.sh
 # Then in Discord:
 [p]reload poehub
 ```
@@ -230,7 +232,7 @@ Search for specific models:
 
 ```
 Total Lines of Code:    ~1,800 lines
-Core Python Files:      5 files (poehub.py, api_client.py, conversation_manager.py, encryption.py, __init__.py)
+Core Python Package:    src/poehub/ (includes ui/ views)
 Deployment Scripts:     3 scripts
 Documentation Files:    6 comprehensive guides
 Supported AI Models:    50+ models
@@ -251,7 +253,7 @@ python3 verify_installation.py
 
 **Cog won't load?**
 ```
-[p]addpath ~/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 [p]load poehub
 ```
 
@@ -310,8 +312,8 @@ python3 verify_installation.py
 ### For Developers
 - Check logs regularly: `screen -r poebot`
 - Use verification script: `verify_installation.py`
-- Follow the code in `poehub.py` to understand flow
-- Encryption logic in `encryption.py`
+- Follow the code in `src/poehub/poehub.py` to understand flow
+- Encryption logic in `src/poehub/encryption.py`
 
 ---
 
@@ -338,7 +340,7 @@ After reading this, you should:
 ### First Commands to Try:
 
 ```
-[p]addpath ~/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 [p]load poehub
 [p]poeapikey YOUR_KEY
 [p]listmodels

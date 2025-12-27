@@ -18,11 +18,11 @@ All requested features have been implemented, tested, and documented.
 7. ✅ **Private mode** for DM responses in servers
 
 ### Enhanced Architecture (v1.2.0)
-8. ✅ **Modular Codebase** - Split into `poehub.py`, `api_client.py`, and `conversation_manager.py`
+8. ✅ **Modular Codebase** - Cog code lives under `src/poehub/` (with UI in `src/poehub/ui/`)
 9. ✅ **Conversation context management** - AI remembers up to 50 messages
 10. ✅ **Multiple conversations per user** - separate contexts for different topics
 11. ✅ **Auto-start on server reboot** - systemd service integration
-12. ✅ **Bilingual help system** - Traditional Chinese (繁體中文) support
+12. ✅ **Language selection** - English + Traditional Chinese (繁體中文) support
 
 ---
 
@@ -30,12 +30,13 @@ All requested features have been implemented, tested, and documented.
 
 ### Core Implementation (6 files)
 ```
-poehub.py (32 KB)              - Main cog with Discord logic
-api_client.py (3.5 KB)         - API interaction layer
-conversation_manager.py (3.5 KB) - State management layer
-encryption.py (3.5 KB)         - Encryption helper
-__init__.py (395 B)            - Package initialization
-info.json (922 B)              - Cog metadata
+src/poehub/poehub.py                 - Main cog with Discord logic
+src/poehub/api_client.py             - API interaction layer
+src/poehub/conversation_manager.py   - State management layer
+src/poehub/encryption.py             - Encryption helper
+src/poehub/ui/                       - Discord UI views (dropdowns/buttons)
+src/poehub/__init__.py               - Package initialization
+src/poehub/info.json                 - Cog metadata
 ```
 
 ### Configuration (2 files)
@@ -65,7 +66,7 @@ verify_installation.py         - Dependency checker
 README.md                      - Complete documentation
 QUICKSTART.md                  - 5-minute setup guide
 CONVERSATION_GUIDE.md          - Conversation management
-BILINGUAL_HELP.md              - Chinese/English guide
+BILINGUAL_HELP.md              - Language guide (switch via [p]lang)
 INSTALLATION_CHECKLIST.md      - Setup verification
 SCRIPTS_REFERENCE.md           - All scripts documented
 TROUBLESHOOTING.md             - Problem solving
@@ -97,7 +98,7 @@ CHANGELOG.md                   - Version history
 - `!purge_my_data` - Delete all user data
 
 ### Help (1)
-- `!poehubhelp` (or `!幫助`, `!说明`) - Bilingual help
+- `!poehubhelp` - PoeHub help (localized)
 
 ### Admin (1)
 - `!poeapikey <key>` - Set API key (owner only)
@@ -118,10 +119,9 @@ CHANGELOG.md                   - Version history
 ## 🌐 Language Support
 
 ✅ **English** - Full support
-✅ **Traditional Chinese (繁體中文)** - Full bilingual help
-- All command docstrings bilingual
-- Custom help command with organized Chinese/English reference
-- Chinese aliases: `!幫助`, `!说明`
+✅ **Traditional Chinese (繁體中文)** - Localized menus/help (no mixed bilingual output)
+- Use `!lang` / `!language` to switch language
+- `!config`, `!conv`, and `!poehubhelp` follow your selection
 
 ---
 
@@ -142,7 +142,7 @@ CHANGELOG.md                   - Version history
 
 ### Discord Setup
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_KEY
 !poehubhelp
@@ -192,7 +192,7 @@ CHANGELOG.md                   - Version history
 - Image attachment support
 - Automatic DM handling
 - Private mode toggle
-- Bilingual help (English/Chinese)
+- Localized menus/help (English or 繁體中文)
 
 ---
 
@@ -262,7 +262,7 @@ CHANGELOG.md                   - Version history
 **Features:**
 - `README.md` - Complete feature reference
 - `CONVERSATION_GUIDE.md` - Conversation management
-- `BILINGUAL_HELP.md` - Chinese/English support
+- `BILINGUAL_HELP.md` - Language selection guide
 
 **Management:**
 - `SCRIPTS_REFERENCE.md` - All helper scripts
@@ -285,7 +285,7 @@ CHANGELOG.md                   - Version history
 ✅ Auto-start on server reboot - Systemd service
 ✅ Conversation context - Multiple conversations per user
 ✅ Switch to previous conversations - Full management system
-✅ Traditional Chinese support - Bilingual help
+✅ Traditional Chinese support - localized menus/help
 ✅ Modular Architecture - Split code into specialized modules
 
 ### Quality Standards
@@ -337,7 +337,7 @@ CHANGELOG.md                   - Version history
 
 ### In Discord
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_KEY
 !poehubhelp
@@ -366,7 +366,7 @@ CHANGELOG.md                   - Version history
 
 1. **Functional** - All features working as requested
 2. **Secure** - Encrypted storage, API key protection
-3. **User-Friendly** - 13 intuitive commands, bilingual help
+3. **User-Friendly** - 13 intuitive commands, localized menus/help
 4. **Maintainable** - Modular code, clean architecture
 5. **Production-Ready** - Auto-start, status monitoring, logging
 6. **Scalable** - Per-user isolation, efficient caching
@@ -376,7 +376,7 @@ CHANGELOG.md                   - Version history
 ---
 
 **Project Location:** `~/Poehub/`
-**Cog Location:** `~/red-cogs/poehub/`
+**Cog Location:** `/home/<your-user>/red-cogs/poehub/`
 **Last Updated:** December 23, 2025
 **Ready For:** Production Deployment
 

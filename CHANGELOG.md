@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Offline dummy mode with `[p]poedummymode` for testing PoeHub without a live Poe API key.
+- Interactive `[p]poeconfig` menu for managing models, prompts, and dummy mode via Discord buttons.
+- `POEHUB_ENABLE_DUMMY_MODE` environment flag (default OFF) to hide dummy-mode commands and UI in release builds.
+
 ## [1.3.0] - 2025-12-23
 
 ### Refactored
@@ -36,11 +43,11 @@
 - **Prompt Commands**: `setdefaultprompt`, `cleardefaultprompt`, `setprompt`, `myprompt`, `clearprompt`
 - **Per-User Isolation**: Personal prompts are completely isolated between users
 - **Prompt Priority**: Personal prompts override default prompts
-- **SYSTEM_PROMPTS_GUIDE.md**: Comprehensive bilingual guide for system prompts
+- **SYSTEM_PROMPTS_GUIDE.md**: System prompt guide
 
 ### Changed
 - System prompts now automatically applied to all API calls (`ask` command and DM responses)
-- Updated bilingual help command to include prompt commands
+- Updated help/menu language handling
 - Enhanced security: All prompts stored encrypted per-user
 
 ### Technical Details
@@ -107,10 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### File Structure
 ```
 Poehub/
-├── poehub.py (478 lines)          # Main cog implementation
-├── encryption.py (120 lines)       # Encryption helper
-├── __init__.py                     # Package initialization
-├── info.json                       # Cog metadata
+├── src/poehub/                     # Cog package source
+│   ├── poehub.py                   # Main cog implementation
+│   ├── api_client.py               # Poe/OpenAI client wrapper
+│   ├── conversation_manager.py     # Conversation state + encryption
+│   ├── encryption.py               # Encryption helper
+│   ├── ui/                         # Discord UI views
+│   ├── __init__.py                 # Package initialization
+│   └── info.json                   # Cog metadata
 ├── requirements.txt                # Python dependencies
 ├── deploy_poe_bot.sh              # Deployment automation
 ├── start_bot.sh                   # Bot startup script
@@ -276,7 +287,7 @@ Poehub/
 ```bash
 cd ~/Poehub
 git pull  # If using git
-cp poehub.py encryption.py __init__.py info.json ~/red-cogs/poehub/
+./sync_to_red.sh
 ```
 
 ### In Discord
