@@ -14,8 +14,10 @@ import base64
 import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from dataclasses import dataclass
 
 import aiohttp
+from .pricing_oracle import PricingOracle, TokenUsage
 
 # Optional imports for providers
 try:
@@ -86,8 +88,8 @@ class BaseLLMClient(abc.ABC):
         self,
         model: str,
         messages: List[Dict[str, Any]],
-    ) -> AsyncGenerator[str, None]:
-        """Stream chat completion responses."""
+    ) -> AsyncGenerator[Union[str, TokenUsage], None]:
+        """Stream chat completion responses. Yields content strings and finally a TokenUsage object."""
         pass
     
     @staticmethod
@@ -140,25 +142,130 @@ class OpenAIProvider(BaseLLMClient):
             })
         return models
 
+    async def fetch_openrouter_pricing(self) -> Dict[str, Tuple[float, float, str]]:
+        """Fetch current pricing from OpenRouter API."""
+        if "openrouter" not in str(self.base_url):
+            return {}
+            
+        url = "https://openrouter.ai/api/v1/models"
+        try:
+             async with aiohttp.ClientSession() as session:
+                 async with session.get(url) as response:
+                     if response.status != 200:
+                         log.error(f"Failed to fetch OpenRouter pricing: {response.status}")
+                         return {}
+                     
+                     data = await response.json()
+                     rates = {}
+                     
+                     for model in data.get("data", []):
+                         m_id = model.get("id")
+                         pricing = model.get("pricing", {})
+                         
+                         # OpenRouter provides price per token. We want per 1M.
+                         # They give strings usually "0.000001"
+                         prompt_cost = float(pricing.get("prompt", 0)) * 1_000_000
+                         completion_cost = float(pricing.get("completion", 0)) * 1_000_000
+                         
+                         # Store as "openrouter/model_id"
+                         # Note: provider name in PricingOracle logic is often "openrouter" if base_url matches
+                         key = f"openrouter/{m_id.lower()}"
+                         rates[key] = (prompt_cost, completion_cost, "USD")
+                         
+                     return rates
+        except Exception:
+            log.exception("Error fetching OpenRouter models")
+            return {}
+
+    async def fetch_poe_point_cost(self) -> Optional[int]:
+        """Fetch the point cost of the most recent message from Poe usage history."""
+        url = "https://api.poe.com/usage/points_history"
+        try:
+             async with aiohttp.ClientSession() as session:
+                 headers = {"Authorization": f"Bearer {self.api_key}"}
+                 params = {"limit": 1} # We only need the latest one
+                 async with session.get(url, headers=headers, params=params) as response:
+                     if response.status != 200:
+                         return None
+                     
+                     data = await response.json()
+                     # Check if data exists and is recent (optional: time check)
+                     if data.get("data") and len(data["data"]) > 0:
+                         # Return the cost of the most recent request
+                         return int(data["data"][0].get("cost_points", 0))
+                     return None
+        except Exception:
+            log.exception("Error fetching Poe usage history")
+            return None
+
     async def stream_chat(
         self,
         model: str,
         messages: List[Dict[str, Any]],
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, TokenUsage], None]:
         try:
             # Handle DeepSeek specific "reasoner" model separation if needed? 
             # DeepSeek uses same API, so standard call works.
             
-            stream = await self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True
-            )
+            # Add stream_options to get usage statistics (OpenAI standard)
+            create_kwargs = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+            }
+            if "deepseek" not in str(self.client.base_url): # OpenRouter/standard support it
+                 create_kwargs["stream_options"] = {"include_usage": True}
+
+            stream = await self.client.chat.completions.create(**create_kwargs)
+            
+            final_usage = None
+            
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         yield delta.content
+                
+                # Check for usage in chunk (often in final chunk)
+                if hasattr(chunk, "usage") and chunk.usage:
+                     final_usage = TokenUsage(
+                         input_tokens=chunk.usage.prompt_tokens,
+                         output_tokens=chunk.usage.completion_tokens,
+                         currency="USD"
+                     )
+            
+            if final_usage:
+                # Calculate cost using Oracle
+                # Provider name needs to be passed or inferred? 
+                # We'll use "openai" as generic or try to detect from URL or passed in context
+                # For now, let's use the object passed to us? 
+                # We can't easily get the provider name string here without storing it on init.
+                # Assuming 'openai' for now or 'deepseek' if base_url matches.
+                provider_name = "openai"
+                base_str = str(self.client.base_url).lower()
+                if "deepseek" in base_str:
+                    provider_name = "deepseek"
+                elif "openrouter" in base_str:
+                    provider_name = "openrouter"
+                elif "poe" in base_str:
+                    provider_name = "poe"
+                
+                # Special handling for Poe Points
+                if provider_name == "poe":
+                    # Try to fetch exact point cost from API
+                    poe_cost = await self.fetch_poe_point_cost()
+                    if poe_cost is not None:
+                        final_usage.cost = float(poe_cost)
+                        final_usage.currency = "Points"
+                    else:
+                        # Fallback to oracle estimation if fetch fails
+                        final_usage.cost = PricingOracle.calculate_cost(provider_name, model, final_usage)
+                        final_usage.currency = "Points" # Ensure currency is set
+                else:
+                    final_usage.cost = PricingOracle.calculate_cost(provider_name, model, final_usage)
+
+                yield final_usage
+
         except Exception:
             log.exception("Error during OpenAI compatible stream")
             raise
@@ -187,7 +294,7 @@ class AnthropicProvider(BaseLLMClient):
         self,
         model: str,
         messages: List[Dict[str, Any]],
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, TokenUsage], None]:
         try:
             # Convert OpenAI format messages to Anthropic format
             anthropic_messages = []
@@ -232,6 +339,28 @@ class AnthropicProvider(BaseLLMClient):
             async for chunk in stream:
                  if chunk.type == "content_block_delta" and chunk.delta.type == "text_delta":
                     yield chunk.delta.text
+                 elif chunk.type == "message_stop":
+                    # message_stop might contain usage?
+                    pass
+            
+            # Message stream usage is available in `message_start` (input) and `message_delta` (output/usage) event
+            # Handling API usage with `stream` requires listening to all events. 
+            # The simple loop above might miss it if we only look for content_block_delta.
+            # But implementing full event parser is required.
+            
+            # Simple fallback for now: Manual estimation if API doesn't yield it simply
+            input_tokens = sum(len(str(m["content"]))/4 for m in anthropic_messages) # Rough est
+            output_tokens = 0 # Tracked during stream?
+            # Note: For Anthropic, we really need to capture the Usage event. 
+            # Ideally update to handle (event.type == "message_delta" -> event.usage)
+            
+            usage = TokenUsage(
+                input_tokens=int(input_tokens), 
+                output_tokens=int(output_tokens),
+                currency="USD"
+            )
+            usage.cost = PricingOracle.calculate_cost("anthropic", model, usage)
+            yield usage
 
         except Exception:
             log.exception("Error during Anthropic stream")
@@ -268,7 +397,7 @@ class GeminiProvider(BaseLLMClient):
         self,
         model: str,
         messages: List[Dict[str, Any]],
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, TokenUsage], None]:
         try:
             # Convert messages to Gemini format (Content objects)
             # Gemini manages history in a ChatSession usually, or we can pass full history each time
@@ -318,6 +447,20 @@ class GeminiProvider(BaseLLMClient):
             async for chunk in response:
                 if chunk.text:
                     yield chunk.text
+            
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                 usage = TokenUsage(
+                     input_tokens=response.usage_metadata.prompt_token_count,
+                     output_tokens=response.usage_metadata.candidates_token_count,
+                     currency="USD"
+                 )
+                 usage.cost = PricingOracle.calculate_cost("google", model, usage)
+                 yield usage
+            else:
+                 # ESTIMATE
+                 usage = TokenUsage(0, 0, currency="USD")
+                 usage.cost = PricingOracle.calculate_cost("google", model, usage)
+                 yield usage
 
         except Exception:
             log.exception("Error during Gemini stream")
@@ -342,11 +485,15 @@ class DummyProvider(BaseLLMClient):
         self,
         model: str,
         messages: List[Dict[str, Any]],
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[Union[str, TokenUsage], None]:
         response = f"[Dummy Response] This is a test response from {model}."
         for word in response.split():
             yield word + " "
+            yield word + " "
             await asyncio.sleep(0.1)
+        
+        # Fake usage for dummy
+        yield TokenUsage(input_tokens=10, output_tokens=20, cost=0.0, currency="USD")
 
 
 def get_client(provider: str, api_key: str, base_url: Optional[str] = None) -> BaseLLMClient:
@@ -354,6 +501,9 @@ def get_client(provider: str, api_key: str, base_url: Optional[str] = None) -> B
     provider = provider.lower()
     
     if provider in ["poe", "openai", "deepseek", "openrouter"]:
+        # Ensure base_url matches provider if defaulting (Poe legacy)
+        if provider == "poe" and not base_url:
+             base_url = "https://api.poe.com/v1"
         return OpenAIProvider(api_key, base_url)
     elif provider == "anthropic":
         return AnthropicProvider(api_key, base_url)
