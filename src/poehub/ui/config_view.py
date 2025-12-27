@@ -8,6 +8,11 @@ import discord
 from redbot.core import commands as red_commands
 
 from ..i18n import tr
+from ..prompt_utils import (
+    PROMPT_PREFILL_LIMIT,
+    PROMPT_TEXTINPUT_MAX,
+    send_prompt_files_dm,
+)
 from .common import CloseMenuButton
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -95,28 +100,68 @@ class ModelSelect(discord.ui.Select):
 class PromptModal(discord.ui.Modal):
     """Modal to update the user's personal system prompt."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        lang: str,
+        user_prompt: Optional[str],
+        fallback_prompt: Optional[str],
+    ) -> None:
         super().__init__(title=tr(lang, "CONFIG_PROMPT_MODAL_TITLE"))
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
+        self._stored_prompt = user_prompt or ""
+        self._append_mode = False
+
+        prefill_text: Optional[str] = None
+        placeholder = tr(lang, "CONFIG_PROMPT_MODAL_PLACEHOLDER")
+
+        if user_prompt:
+            if len(user_prompt) <= PROMPT_PREFILL_LIMIT:
+                prefill_text = user_prompt
+            else:
+                self._append_mode = True
+                placeholder = tr(
+                    lang,
+                    "CONFIG_PROMPT_APPEND_PLACEHOLDER",
+                    limit=PROMPT_PREFILL_LIMIT,
+                )
+        elif fallback_prompt and len(fallback_prompt) <= PROMPT_TEXTINPUT_MAX:
+            prefill_text = fallback_prompt
+        elif fallback_prompt:
+            placeholder = tr(lang, "CONFIG_PROMPT_DEFAULT_TOO_LONG")
 
         self.prompt: discord.ui.TextInput = discord.ui.TextInput(
             label=tr(lang, "CONFIG_PROMPT_MODAL_LABEL"),
             style=discord.TextStyle.paragraph,
             required=True,
-            max_length=1500,
-            placeholder=tr(lang, "CONFIG_PROMPT_MODAL_PLACEHOLDER"),
+            max_length=PROMPT_TEXTINPUT_MAX,
+            placeholder=placeholder,
+            default=prefill_text,
         )
         self.add_item(self.prompt)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        prompt_text = self.prompt.value.strip()
-        await self.cog.config.user(self.ctx.author).system_prompt.set(prompt_text)
-        await interaction.response.send_message(
-            tr(self.lang, "CONFIG_PROMPT_UPDATED"),
-            ephemeral=True,
-        )
+        raw_value = self.prompt.value
+        if not raw_value or not raw_value.strip():
+            await interaction.response.send_message(
+                tr(self.lang, "CONFIG_PROMPT_MODAL_EMPTY"),
+                ephemeral=True,
+            )
+            return
+
+        new_text = raw_value
+        if self._append_mode and self._stored_prompt:
+            updated_prompt = self._stored_prompt + new_text
+            status_text = tr(self.lang, "CONFIG_PROMPT_APPENDED")
+        else:
+            updated_prompt = new_text
+            status_text = tr(self.lang, "CONFIG_PROMPT_UPDATED")
+
+        await self.cog.config.user(self.ctx.author).system_prompt.set(updated_prompt)
+        await interaction.response.send_message(status_text, ephemeral=True)
 
 
 class SetPromptButton(discord.ui.Button):
@@ -132,7 +177,11 @@ class SetPromptButton(discord.ui.Button):
         self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(PromptModal(self.cog, self.ctx, self.lang))
+        user_prompt = await self.cog.config.user(self.ctx.author).system_prompt()
+        default_prompt = await self.cog.config.default_system_prompt()
+        await interaction.response.send_modal(
+            PromptModal(self.cog, self.ctx, self.lang, user_prompt, default_prompt)
+        )
 
 
 class ShowPromptButton(discord.ui.Button):
@@ -158,6 +207,23 @@ class ShowPromptButton(discord.ui.Button):
             )
             return
 
+        payloads = []
+        if user_prompt and len(user_prompt) > 1000:
+            payloads.append((f"personal_prompt_{self.ctx.author.id}.txt", user_prompt))
+        if default_prompt and len(default_prompt) > 1000:
+            payloads.append(("default_prompt.txt", default_prompt))
+
+        if payloads:
+            dm_message = tr(self.lang, "MY_PROMPT_DM_BODY")
+            dm_sent = await send_prompt_files_dm(interaction.user, payloads, dm_message)
+            message = (
+                tr(self.lang, "CONFIG_PROMPT_DM_SENT")
+                if dm_sent
+                else tr(self.lang, "CONFIG_PROMPT_DM_BLOCKED")
+            )
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+
         embed = discord.Embed(
             title=tr(self.lang, "CONFIG_PROMPT_EMBED_TITLE"),
             color=discord.Color.blurple(),
@@ -165,13 +231,13 @@ class ShowPromptButton(discord.ui.Button):
         if user_prompt:
             embed.add_field(
                 name=tr(self.lang, "CONFIG_PROMPT_FIELD_PERSONAL"),
-                value=f"```{user_prompt[:1000]}{'...' if len(user_prompt) > 1000 else ''}```",
+                value=f"```{user_prompt}```",
                 inline=False,
             )
         if default_prompt:
             embed.add_field(
                 name=tr(self.lang, "CONFIG_PROMPT_FIELD_DEFAULT"),
-                value=f"```{default_prompt[:1000]}{'...' if len(default_prompt) > 1000 else ''}```",
+                value=f"```{default_prompt}```",
                 inline=False,
             )
 
@@ -242,5 +308,3 @@ class DummyToggleButton(discord.ui.Button):
             else tr(self.lang, "CONFIG_DUMMY_DISABLED_OK"),
             ephemeral=True,
         )
-
-
