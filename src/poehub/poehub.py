@@ -322,25 +322,123 @@ class PoeHub(red_commands.Cog):
 
         return embed
     
+    async def _process_chat_request(
+        self, 
+        message: discord.Message, 
+        content: str, 
+        ctx: red_commands.Context = None
+    ):
+        """
+        Unified handler for processing chat requests from commands or mentions.
+        Handles:
+        - API client check
+        - User settings (model, system prompt)
+        - Quote/Reply context
+        - Image attachments
+        - Conversation history management (add user msg -> stream reply -> add bot msg)
+        """
+        if not self.client:
+            if ctx:
+                await ctx.send("❌ API client not initialized. Bot owner must use `[p]poeapikey` first.")
+            else:
+                await message.channel.send("❌ API client not initialized. Please contact the bot owner.")
+            return
+
+        # Determine target channel and user
+        target_channel = message.channel
+        user = message.author
+        
+        # Get user's preferences
+        user_model = await self.config.user(user).model()
+        active_conv_id = await self._get_active_conversation_id(user.id)
+        
+        # Load conversation history
+        history = await self._get_conversation_messages(user.id, active_conv_id)
+        
+        # --- Handle Quote / Reply Context ---
+        quote_context = ""
+        if message.reference and message.reference.message_id:
+            try:
+                # Attempt to fetch the referenced message
+                # If it's a reply to a message in the same channel, we can often get it from cache or fetch it
+                ref_msg = message.reference.cached_message
+                if not ref_msg:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                
+                if ref_msg and ref_msg.content:
+                    # Format the quote
+                    # We'll create a structured representation or just prepend it to the user content.
+                    # Prepending clear context is usually robust for LLMs.
+                    quote_context = f"[Replying to {ref_msg.author.display_name}: \"{ref_msg.content}\"]\n\n"
+                    
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                # If we fail to fetch (deleted, no permission), just ignore
+                pass
+
+        # --- Handle Attachments ---
+        image_urls = []
+        if message.attachments:
+            for attachment in message.attachments:
+                if attachment.content_type and attachment.content_type.startswith("image/"):
+                    image_urls.append(attachment.url)
+        
+        # --- Construct User Message ---
+        # Combine quote context with user's actual content
+        full_text_input = f"{quote_context}{content}" if quote_context else content
+        
+        if image_urls:
+            # If we have images, format specifically for the API
+            # Note: format_image_message usually puts the text at the start or end of the array
+            # We pass the combined text
+            formatted_content = self.client.format_image_message(full_text_input, image_urls)
+            new_message = {"role": "user", "content": formatted_content}
+        else:
+            new_message = {"role": "user", "content": full_text_input}
+
+        # Save to conversation history
+        # We save exactly what we are sending so history stays consistent
+        # For text+image, 'formatted_content' is a list of dicts or special format handled by client
+        # For text only, it's a string
+        msg_content_to_save = formatted_content if image_urls else full_text_input
+        await self._add_message_to_conversation(user.id, active_conv_id, "user", msg_content_to_save)
+        
+        # Combine history
+        messages = history + [new_message]
+        
+        # --- System Prompt ---
+        system_prompt = await self._get_system_prompt(user.id)
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
+        
+        # --- Stream Response ---
+        # We need a context-like object or channel to send to. 
+        # _stream_response writes to 'ctx' if provided, or 'target_channel' if provided
+        await self._stream_response(
+            ctx=ctx,
+            messages=messages,
+            model=user_model,
+            target_channel=target_channel,
+            save_to_conv=(user.id, active_conv_id)
+        )
+
     async def _stream_response(
         self, 
-        ctx: red_commands.Context, 
+        ctx: Optional[red_commands.Context], 
         messages: List[Dict[str, Any]], 
         model: str,
         target_channel=None,
         save_to_conv=None
     ):
         """Stream the AI response and update Discord message."""
-        if not self.client:
-            await ctx.send("❌ API client not initialized. Please set your API key first.")
-            return
-        
+        # target_channel fallback
+        dest = target_channel if target_channel else (ctx.channel if ctx and hasattr(ctx, 'channel') else None)
+        if not dest:
+             log.error("No destination channel for stream response")
+             return
+
         try:
             # Create initial response message
-            if target_channel:
-                response_msg = await target_channel.send("🤔 Thinking...")
-            else:
-                response_msg = await ctx.send("🤔 Thinking...")
+            response_msg = await dest.send("🤔 Thinking...")
             
             accumulated_content = ""
             last_update = time.time()
@@ -375,10 +473,7 @@ class PoeHub(red_commands.Cog):
                 
                 # Send additional chunks if needed
                 for chunk in chunks[1:]:
-                    if target_channel:
-                        await target_channel.send(chunk)
-                    else:
-                        await ctx.send(chunk)
+                    await dest.send(chunk)
                 
                 # Save assistant response to conversation
                 if save_to_conv:
@@ -390,7 +485,7 @@ class PoeHub(red_commands.Cog):
         except Exception as exc:  # noqa: BLE001 - surface errors to user
             error_msg = f"❌ Error communicating with Poe API: {exc}"
             log.exception("Error communicating with Poe API")
-            await ctx.send(error_msg)
+            await dest.send(error_msg)
     
     # --- Conversation Management Methods (Refactored) ---
     
@@ -645,46 +740,7 @@ class PoeHub(red_commands.Cog):
         Ask a question to Poe AI (with conversation context)
         Usage: [p]ask <your question>
         """
-        if not self.client:
-            await ctx.send("❌ API key not set. Bot owner must use `[p]poeapikey` first.")
-            return
-        
-        # Get user's preferences
-        user_model = await self.config.user(ctx.author).model()
-        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
-        
-        # Load conversation history
-        history = await self._get_conversation_messages(ctx.author.id, active_conv_id)
-        
-        # Check for image attachments
-        image_urls = []
-        if ctx.message.attachments:
-            for attachment in ctx.message.attachments:
-                if attachment.content_type and attachment.content_type.startswith("image/"):
-                    image_urls.append(attachment.url)
-        
-        # Format new message
-        if image_urls:
-            content = self.client.format_image_message(query, image_urls)
-            new_message = {"role": "user", "content": content}
-            # Save structured content with images to conversation history
-            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", content)
-        else:
-            new_message = {"role": "user", "content": query}
-            # Save text-only content to conversation history
-            await self._add_message_to_conversation(ctx.author.id, active_conv_id, "user", query)
-        
-        # Combine history with new message
-        messages = history + [new_message]
-        
-        # Get system prompt and prepend if exists
-        system_prompt = await self._get_system_prompt(ctx.author.id)
-        if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
-        
-        # Stream the response
-        await self._stream_response(ctx, messages, user_model, None, 
-                                    save_to_conv=(ctx.author.id, active_conv_id))
+        await self._process_chat_request(ctx.message, query, ctx)
     
     @red_commands.command(name="setmodel")
     async def set_model(self, ctx: red_commands.Context, *, model_name: str):
@@ -1056,70 +1112,55 @@ class PoeHub(red_commands.Cog):
 
     @red_commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Listen for DM messages"""
-        if message.author.bot or not isinstance(message.channel, discord.DMChannel):
+        """Listen for messages (DMs or Mentions)"""
+        # Ignore bot messages
+        if message.author.bot:
             return
-            
+
+        # Check if this is a command first for ALL messages (DM or Server)
+        # This prevents commands triggering AI responses
         ctx = await self.bot.get_context(message)
-        if ctx.valid or not self.client:
+        if ctx.valid:
             return
-            
-        try:
-            user_model = await self.config.user(message.author).model()
-            active_conv_id = await self._get_active_conversation_id(message.author.id)
-            
-            history = await self._get_conversation_messages(message.author.id, active_conv_id)
-            
-            # Format message
-            image_urls = []
-            if message.attachments:
-                for attachment in message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith("image/"):
-                        image_urls.append(attachment.url)
-            
-            if image_urls:
-                content = self.client.format_image_message(message.content, image_urls)
-                new_msg = {"role": "user", "content": content}
-                # Save structured content with images to conversation history
-                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", content)
-            else:
-                new_msg = {"role": "user", "content": message.content}
-                # Save text-only content to conversation history
-                await self._add_message_to_conversation(message.author.id, active_conv_id, "user", message.content)
-            messages = history + [new_msg]
-            
-            system_prompt = await self._get_system_prompt(message.author.id)
-            if system_prompt:
-                messages = [{"role": "system", "content": system_prompt}] + messages
-            
-            response_msg = await message.channel.send("🤔 Thinking...")
-            
-            # Stream response (DM version)
-            accumulated_content = ""
-            last_update = time.time()
-            stream = self.client.stream_chat(user_model, messages)
-            
-            async for content in stream:
-                accumulated_content += content
-                if time.time() - last_update >= 2.0:
-                    try:
-                        await response_msg.edit(content=accumulated_content[:1900] + "...")
-                        last_update = time.time()
-                    except:
-                        pass
-            
-            if accumulated_content:
-                chunks = self._split_message(accumulated_content)
-                await response_msg.edit(content=chunks[0])
-                for chunk in chunks[1:]:
-                    await message.channel.send(chunk)
-                await self._add_message_to_conversation(message.author.id, active_conv_id, "assistant", accumulated_content)
-            else:
-                await response_msg.edit(content="❌ No response.")
+
+        # 1. Listen for DM messages
+        is_dm = isinstance(message.channel, discord.DMChannel)
+        
+        # 2. Listen for mentions in Guilds
+        # We check if the bot is actually mentioned in the message text or reply
+        is_mentioned = self.bot.user in message.mentions
+        
+        # If quoting the bot, that counts as a mention usually, but let's be strict:
+        # User must explicitly mention @Bot or be in DM.
+        if not is_dm and not is_mentioned:
+            return
+
+        # Prepare content
+        content = message.content
+        
+        # If it's a mention, we might want to strip the mention format so the bot doesn't read its own name
+        # But usually LLMs handle names fine. Let's strict it slightly to avoid confusion if it's like "<@123> hello"
+        if is_mentioned:
+            # Strip the bot's mention from content to keep it clean
+            # We can use regex or simple replace
+            mention_strings = [
+                f"<@{self.bot.user.id}>", 
+                f"<@!{self.bot.user.id}>"
+            ]
+            for m in mention_strings:
+                content = content.replace(m, "").strip()
                 
-        except Exception:
-            log.exception("DM handler error")
-            await message.channel.send("❌ An error occurred.")
+            # If content is empty after stripping (e.g. just a ping), we might want to ignore or say "Yes?"
+            # But let's pass it to processor; maybe user sent an image only.
+            if not content and not message.attachments:
+                # Just a ping with no content?
+                return
+
+        # Check API client readiness (processor handles it, but context is different)
+        # Processor handles it.
+
+        # Process
+        await self._process_chat_request(message, content)
 
     @red_commands.command(name="poehubhelp", aliases=["phelp"])
     async def poehub_help(self, ctx: red_commands.Context):

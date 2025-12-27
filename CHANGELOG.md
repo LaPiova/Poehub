@@ -7,6 +7,15 @@
 - Interactive `[p]poeconfig` menu for managing models, prompts, and dummy mode via Discord buttons.
 - `POEHUB_ENABLE_DUMMY_MODE` environment flag (default OFF) to hide dummy-mode commands and UI in release builds.
 
+## [1.3.1] - 2025-12-23
+
+### Added
+- **Implicit Mention Support**: Trigger the bot by mentioning it (`@Bot`) in any channel.
+- **Quote Context**: Bot now sees the content of the message you are replying to.
+
+### Fixed
+- **DM Command Bug**: Commands sent in DMs no longer trigger a double response (command + chat).
+
 ## [1.3.0] - 2025-12-23
 
 ### Refactored

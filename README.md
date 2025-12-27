@@ -13,6 +13,8 @@ A comprehensive Red-DiscordBot Cog that integrates with **Poe**, **OpenAI**, **A
 - 💬 **DM Support**: Chat with the bot directly via Discord DMs
 - 🧹 **Data Purging**: Users can delete their data anytime
 - 🌊 **Streaming Responses**: Real-time response streaming with 2-second update intervals
+- 🔔 **Implicit Mentions**: Trigger the bot naturally by mentioning it (`@Bot`) in channels
+- 🗣️ **Quote Context**: Reply to a message with a mention or command to have the bot see the context
 - 🌐 **Bilingual Help**: Full Traditional Chinese (繁體中文) support
 - 🔄 **Auto-Start**: Optional systemd service for automatic bot start on server reboot
 
@@ -263,6 +265,24 @@ Removes the default system prompt.
 ```
 Quickly switch between the offline dummy client and the real Poe API. This command is available only when `POEHUB_ENABLE_DUMMY_MODE=1`.
 
+### Natural Conversation (Mentions & Replies)
+ 
+#### Mention to Ask
+Instead of using `[p]ask`, you can simply mention the bot in a channel to trigger a response:
+ 
+```
+@PoeBot What do you think about this?
+```
+ 
+#### Contextual Replies
+If you want the bot to analyze a specific message, simply **reply** to that message and mention the bot (or use `[p]ask`):
+ 
+> **User A**: Here is my error log: `FileNotFoundError...`
+> 
+> **You** (replying to User A): @PoeBot How do I fix this?
+ 
+The bot will see the original error log and your question!
+ 
 ### DM Support
 
 Simply send a message to the bot via DM (without using a command prefix) and it will respond automatically!

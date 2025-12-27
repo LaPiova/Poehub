@@ -91,10 +91,11 @@ Permanently deletes ALL your conversation history. This cannot be undone.
 
 ### Asking Questions
 
-When you use `!ask`, your question is automatically added to your active conversation:
+When you use `!ask` or **mention the bot**, your question is automatically added to your active conversation:
 
 ```
 !ask What is Python?
+@PoeBot What is Python?
 ```
 
 The AI's response is also saved, maintaining context for future questions:
