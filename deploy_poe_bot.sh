@@ -106,7 +106,7 @@ pip install --upgrade pip setuptools wheel
 pip install Red-DiscordBot
 
 # Install PoeHub dependencies
-pip install openai cryptography
+pip install openai anthropic google-generativeai cryptography
 
 print_success "All packages installed!"
 
@@ -154,75 +154,23 @@ else
 fi
 
 ###############################################################################
-# Step 6: Create Startup Script
+# Step 6: Install Startup Scripts
 ###############################################################################
-print_status "Step 6: Creating startup script..."
+print_status "Step 6: Installing startup scripts to $HOME..."
 
-cat > "$HOME/start_bot.sh" << 'EOF'
-#!/bin/bash
+# Copy scripts if they exist
+for script in start_bot.sh start_bot_screen.sh install_service.sh; do
+    if [ -f "$SCRIPT_DIR/$script" ]; then
+        cp "$SCRIPT_DIR/$script" "$HOME/$script"
+        chmod +x "$HOME/$script"
+        print_success "Installed $script"
+    else
+        print_warning "Script $script not found in $SCRIPT_DIR"
+    fi
+done
 
-# Activate virtual environment
-source "$HOME/.redenv/bin/activate"
-
-# Start the bot
-echo "Starting ${POEHUB_REDBOT_INSTANCE:-PoeBot}..."
-redbot "${POEHUB_REDBOT_INSTANCE:-PoeBot}"
-
-# Deactivate venv on exit
-deactivate
-EOF
-
-chmod +x "$HOME/start_bot.sh"
-print_success "Startup script created at ~/start_bot.sh"
-
-###############################################################################
-# Step 7: Create Screen Session Helper
-###############################################################################
-print_status "Step 7: Creating screen session helper..."
-
-cat > "$HOME/start_bot_screen.sh" << 'EOF'
-#!/bin/bash
-
-# Start bot in a detached screen session
-screen -dmS "${POEHUB_SCREEN_NAME:-poebot}" bash -c "source $HOME/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
-
-echo "Bot started in screen session 'poebot'"
-echo "To attach: screen -r poebot"
-echo "To detach: Press Ctrl+A then D"
-EOF
-
-chmod +x "$HOME/start_bot_screen.sh"
-print_success "Screen helper created at ~/start_bot_screen.sh"
-
-###############################################################################
-# Step 8: Create Systemd Service (Optional)
-###############################################################################
-print_status "Step 8: Creating systemd service file..."
-
-SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
-cat > "$HOME/${SERVICE_NAME}.service" << EOF
-[Unit]
-Description=Red-DiscordBot - ${INSTANCE_NAME} Instance
-After=network.target
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$HOME
-ExecStart=$HOME/.redenv/bin/redbot ${INSTANCE_NAME}
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-print_success "Systemd service file created at ~/${SERVICE_NAME}.service"
-print_warning "To install the service, run:"
-print_warning "  sudo cp ~/${SERVICE_NAME}.service /etc/systemd/system/"
-print_warning "  sudo systemctl daemon-reload"
-print_warning "  sudo systemctl enable ${SERVICE_NAME}.service"
-print_warning "  sudo systemctl start ${SERVICE_NAME}.service"
+print_success "Startup scripts installed!"
+print_status "You can now use ~/install_service.sh to setup the systemd service."
 
 ###############################################################################
 # Deployment Complete!

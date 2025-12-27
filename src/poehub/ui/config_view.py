@@ -41,9 +41,6 @@ class PoeConfigView(discord.ui.View):
         self.add_item(ShowPromptButton(cog, ctx, lang))
         self.add_item(ClearPromptButton(cog, ctx, lang))
 
-        if owner_mode and cog.allow_dummy_mode:
-            self.add_item(DummyToggleButton(cog, ctx, dummy_state, lang))
-
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
