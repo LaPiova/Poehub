@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 # Mock httpx
 sys.modules["httpx"] = MagicMock()
 
-from poehub.api_client import OpenAIProvider, get_client, TokenUsage
+from poehub.api_client import OpenAIProvider, get_client, TokenUsage, DummyProvider
 
 class TestOpenAIProvider:
     @pytest.fixture
@@ -120,3 +120,36 @@ def test_get_client_factory():
 
     with pytest.raises(ValueError):
         get_client("unknown", "key")
+
+from poehub.api_client import DummyProvider
+
+@pytest.mark.asyncio
+async def test_dummy_provider_stream_chat():
+    provider = DummyProvider()
+    messages = [{"role": "user", "content": "Hello"}]
+    
+    chunks = []
+    usage_received = None
+    
+    async for item in provider.stream_chat("dummy-model", messages):
+        if isinstance(item, str):
+            chunks.append(item)
+        elif isinstance(item, TokenUsage):
+            usage_received = item
+            
+    full_response = "".join(chunks)
+    # The dummy response is "[Dummy Response] This is a test response from dummy-model."
+    # It splits by space and yields "word "
+    # So "word1 word2 " etc.
+    assert "[Dummy Response]" in full_response
+    assert "test response" in full_response
+    
+    # Check for duplicates (primitive check against the logic bug)
+    # The bug was `yield word + " "; yield word + " "`
+    # So we would see "[Dummy [Dummy Response] Response] ..." or rather "word word "
+    # Let's count occurrences of "response"
+    # "response" appears twice in the standard text: "[Dummy Response] ... test response"
+    # usage: 2 times.
+    # With bug: 4 times.
+    assert full_response.count("Response") <= 2
+    assert full_response.count("response") <= 2

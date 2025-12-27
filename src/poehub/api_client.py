@@ -545,7 +545,6 @@ class DummyProvider(BaseLLMClient):
         response = f"[Dummy Response] This is a test response from {model}."
         for word in response.split():
             yield word + " "
-            yield word + " "
             await asyncio.sleep(0.1)
         
         # Fake usage for dummy

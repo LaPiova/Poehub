@@ -98,7 +98,7 @@ class PoeHub(red_commands.Cog):
         }
         
         default_user = {
-            "model": "gpt-5.2",
+            "model": "Gemini-3-Pro",
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
             "system_prompt": None,  # User's custom system prompt (overrides default)
@@ -161,7 +161,6 @@ class PoeHub(red_commands.Cog):
     async def _pricing_update_loop(self):
         """Background task to update pricing monthly (or daily for safety)."""
         await self.bot.wait_until_ready()
-        import asyncio
         while True:
             try:
                 # Update prices
@@ -600,6 +599,8 @@ class PoeHub(red_commands.Cog):
             # Create initial response message
             response_msg = await dest.send("🤔 Thinking...")
             
+            # accumulated_parts = [] # We will use a list for efficient appending
+            accumulated_parts = []
             accumulated_content = ""
             last_update = time.time()
             
@@ -615,15 +616,20 @@ class PoeHub(red_commands.Cog):
                     continue
                 
                 content = item
-                accumulated_content += content
+                accumulated_parts.append(content)
+                # We defer joining until we need to display or save
                 
                 # Update message every 2 seconds to avoid rate limits
                 current_time = time.time()
                 if current_time - last_update >= 2.0:
                     try:
+                        # Join locally for display
+                        # This operation is O(N) but happens rarely (every 2s)
+                        current_full_content = "".join(accumulated_parts)
+                        
                         # Discord has a 2000 char limit
-                        display_content = accumulated_content[:1900]
-                        if len(accumulated_content) > 1900:
+                        display_content = current_full_content[:1900]
+                        if len(current_full_content) > 1900:
                             display_content += "\n...(truncated)"
                         
                         await response_msg.edit(content=display_content)
@@ -632,6 +638,7 @@ class PoeHub(red_commands.Cog):
                         pass  # Ignore rate limit errors during streaming
             
             # Final update
+            accumulated_content = "".join(accumulated_parts)
             if accumulated_content:
                 # Split into chunks intelligently (Discord 2000 char limit)
                 chunks = self._split_message(accumulated_content)
