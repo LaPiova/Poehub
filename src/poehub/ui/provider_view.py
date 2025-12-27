@@ -8,6 +8,8 @@ from redbot.core import commands as red_commands
 
 from ..i18n import tr
 from .common import CloseMenuButton
+from .access_view import AccessControlView
+
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..poehub import PoeHub
@@ -30,6 +32,9 @@ class ProviderConfigView(discord.ui.View):
 
         self.add_item(ProviderSelect(cog, ctx, lang))
         self.add_item(SetKeyButton(cog, ctx, lang))
+        self.add_item(ManageAccessButton(cog, ctx, lang))
+        self.add_item(SetDefaultPromptButton(cog, ctx, lang))
+        self.add_item(CheckPricingButton(cog, lang))
         self.add_item(RefreshButton(lang))
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
 
@@ -181,6 +186,109 @@ class SetKeyButton(discord.ui.Button):
         await interaction.response.send_modal(
             APIKeyModal(self.cog, active_provider, self.lang)
         )
+
+
+class ManageAccessButton(discord.ui.Button):
+    """Button to open Access Control view."""
+    
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label="Manage Access & Budget",
+            style=discord.ButtonStyle.secondary,
+            emoji="🛡️",
+            row=2
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+        
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = AccessControlView(self.cog, self.ctx, self.lang)
+        # Initial update to set correct state (no guild selected)
+        await view.update_view(interaction)
+
+class CheckPricingButton(discord.ui.Button):
+    """Button to check current model pricing."""
+    
+    def __init__(self, cog: "PoeHub", lang: str) -> None:
+        super().__init__(
+            label="Check Pricing",
+            style=discord.ButtonStyle.secondary,
+            emoji="🏷️",
+            row=2
+        )
+        self.cog = cog
+        
+    async def callback(self, interaction: discord.Interaction) -> None:
+        # Get context
+        user_conf = self.cog.config.user(interaction.user)
+        provider = await self.cog.config.active_provider()
+        model = await user_conf.model()
+        
+        # Get Price
+        from ..pricing_oracle import PricingOracle
+        in_price, out_price, currency = PricingOracle.get_price(provider, model)
+        
+        embed = discord.Embed(
+            title=f"🏷️ Pricing Check: {provider.title()}",
+            description=f"Current rates for **{model}**",
+            color=discord.Color.green()
+        )
+        
+        # Format Logic
+        if currency == "Points":
+            suffix = "pts"
+            denom = "msg" # Points are usually per message or compute, but Oracle returns roughly per 1M for consistency
+            # Actually, Oracle fallback for Poe was 20k points.
+            # Let's just show the raw numbers
+            rate_desc = f"**Input:** {in_price:,.0f} {suffix}/1M tokens\n**Output:** {out_price:,.0f} {suffix}/1M tokens"
+            note = "⚠️ Poe prices vary dynamically per message complexity."
+        else:
+            rate_desc = f"**Input:** ${in_price:.2f}/1M tokens\n**Output:** ${out_price:.2f}/1M tokens"
+            note = "sourced from pricing oracle"
+            
+        embed.add_field(name="Rate Card", value=rate_desc, inline=False)
+        embed.set_footer(text=f"Currency: {currency} • {note}")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class SetDefaultPromptButton(discord.ui.Button):
+    """Button to set global default prompt."""
+    
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label="Set Default Prompt",
+            style=discord.ButtonStyle.secondary,
+            emoji="📝",
+            row=2
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+        
+    async def callback(self, interaction: discord.Interaction) -> None:
+        # Re-using the logic from config_view.py's PromptModal but saving to default config
+        await interaction.response.send_modal(DefaultPromptModal(self.cog, self.lang))
+
+
+class DefaultPromptModal(discord.ui.Modal):
+    def __init__(self, cog: "PoeHub", lang: str) -> None:
+        super().__init__(title="Global Default System Prompt")
+        self.cog = cog
+        
+        self.prompt = discord.ui.TextInput(
+            label="System Prompt",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=1500,
+            placeholder="You are a helpful assistant..."
+        )
+        self.add_item(self.prompt)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog.config.default_system_prompt.set(self.prompt.value)
+        await interaction.response.send_message("✅ Global default system prompt updated.", ephemeral=True)
 
 
 class RefreshButton(discord.ui.Button):

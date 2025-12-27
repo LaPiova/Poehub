@@ -34,6 +34,8 @@ echo ""
 echo "Files in $TARGET_DIR:"
 find "$TARGET_DIR" -maxdepth 2 -type f \( -name "*.py" -o -name "*.json" \) -print 2>/dev/null || true
 echo ""
+echo "🔍 Verifying deployment:"
+grep "encryption_key" "$TARGET_DIR/poehub.py" || echo "❌ KEY NOT FOUND IN DEPLOYED FILE"
 echo "📝 Next steps in Discord:"
 echo ""
 echo "   If first time loading:"

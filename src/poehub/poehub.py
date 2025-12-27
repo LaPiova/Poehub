@@ -20,6 +20,8 @@ from redbot.core import Config, commands as red_commands
 from redbot.core.bot import Red
 
 from .api_client import get_client, BaseLLMClient
+from .pricing_oracle import TokenUsage, PricingOracle
+from .pricing_crawler import PricingCrawler
 from .conversation_manager import ConversationManager
 from .encryption import EncryptionHelper, generate_key
 from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
@@ -61,7 +63,8 @@ class PoeHub(red_commands.Cog):
     
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=1234567890, force_registration=True)
+        # Changed identifier to force fresh DB and avoid corruption/migration issues
+        self.config = Config.get_conf(self, identifier=1234567891, force_registration=True)
         self.allow_dummy_mode = ALLOW_DUMMY_MODE
         
         # Default configuration
@@ -79,11 +82,22 @@ class PoeHub(red_commands.Cog):
             "base_url": "https://api.poe.com/v1",
             
             "default_system_prompt": None,
-            "use_dummy_api": False
+            "use_dummy_api": False,
+            "dynamic_rates": {},  # Dict[str, Tuple[float, float, str]] - Provider/Model -> (In, Out, Currency)
+            "encryption_key": None,
+        }
+        
+        default_guild = {
+            "access_allowed": True,
+            "monthly_limit": 5,  # Float (USD), None = infinite
+            "current_spend": 0.0,   # Float (USD)
+            "monthly_limit_points": 250000, # Int (Points), None = infinite
+            "current_spend_points": 0.0,  # Float/Int (Points)
+            "last_reset_month": None,  # Str "YYYY-MM"
         }
         
         default_user = {
-            "model": "Claude-3.5-Sonnet",
+            "model": "gpt-5.2",
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
             "system_prompt": None,  # User's custom system prompt (overrides default)
@@ -92,6 +106,7 @@ class PoeHub(red_commands.Cog):
         
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
+        self.config.register_guild(**default_guild)
         
         self.client: Optional[BaseLLMClient] = None
         self.conversation_manager: Optional[ConversationManager] = None
@@ -127,11 +142,133 @@ class PoeHub(red_commands.Cog):
             self.encryption = EncryptionHelper(encryption_key)
             self.conversation_manager = ConversationManager(self.encryption)
             
+            # Load dynamic rates
+            stored_rates = await self.config.dynamic_rates()
+            if stored_rates:
+                PricingOracle.load_dynamic_rates(stored_rates)
+                log.info(f"Loaded {len(stored_rates)} dynamic pricing rates.")
+            
             # Initialize API client if key exists
             await self._init_client()
             
         except Exception:
             log.exception("Error initializing PoeHub")
+
+        # Start background tasks
+        self.bot.loop.create_task(self._pricing_update_loop())
+            
+    async def _pricing_update_loop(self):
+        """Background task to update pricing monthly (or daily for safety)."""
+        await self.bot.wait_until_ready()
+        import asyncio
+        while True:
+            try:
+                # Update prices
+                log.info("Running automatic pricing update...")
+                new_rates = await PricingCrawler.fetch_rates()
+                if new_rates:
+                    PricingOracle.load_dynamic_rates(new_rates)
+                    
+                    # Persist
+                    current_rates = await self.config.dynamic_rates()
+                    current_rates.update(new_rates)
+                    await self.config.dynamic_rates.set(current_rates)
+                    log.info(f"Automatic pricing update complete. {len(new_rates)} rates loaded.")
+            except Exception:
+                log.exception("Error in pricing update loop")
+            
+            # Sleep for 24 hours
+            await asyncio.sleep(86400)
+
+    async def _resolve_billing_guild(self, user: discord.User, channel: discord.abc.Messageable) -> Optional[discord.Guild]:
+        """Determine which guild should be billed for the request."""
+        # 1. Guild Channel
+        if hasattr(channel, "guild") and channel.guild:
+            if await self.config.guild(channel.guild).access_allowed():
+                return channel.guild
+            return None
+            
+        # 2. DM Channel
+        candidates = []
+        for guild in user.mutual_guilds:
+            # Check if bot is member (implicit in mutual_guilds)
+            if await self.config.guild(guild).access_allowed():
+                candidates.append(guild)
+        
+        if not candidates:
+            return None
+            
+        # Determine stability - Sort by ID to ensure deterministic choice if limits are equal
+        candidates.sort(key=lambda g: g.id)
+            
+        if len(candidates) == 1:
+            return candidates[0]
+            
+        # Multiple candidates: Pick the one with higher limit (None = Infinite is highest)
+        best_guild = None
+        best_limit = -1.0
+        
+        for guild in candidates:
+            limit = await self.config.guild(guild).monthly_limit()
+            if limit is None:
+                return guild # Infinite wins immediately
+            if limit > best_limit:
+                best_limit = limit
+                best_guild = guild
+                
+        return best_guild
+
+    async def _reset_budget_if_new_month(self, guild: discord.Guild) -> None:
+        """Reset guild spend if we are in a new month."""
+        import datetime
+        current_month = datetime.datetime.now().strftime("%Y-%m")
+        last_reset = await self.config.guild(guild).last_reset_month()
+        
+        log.info(f"Debug Reset Check - Guild: {guild.id}, Stored: {last_reset}, Current: {current_month}")
+        
+        if last_reset != current_month:
+            # It's a new month! Reset spend (Both USD and Points).
+            log.info(f"TRIGGERING RESET for Guild {guild.id}")
+            await self.config.guild(guild).current_spend.set(0.0)
+            await self.config.guild(guild).current_spend_points.set(0.0)
+            await self.config.guild(guild).last_reset_month.set(current_month)
+            log.info(f"Reset monthly budget for guild {guild.name} ({guild.id}) - Month: {current_month}")
+
+    async def _check_budget(self, guild: discord.Guild) -> bool:
+        """Check if guild has budget remaining."""
+        await self._reset_budget_if_new_month(guild)
+        
+        # Determine strictness based on active provider
+        active_provider = await self.config.active_provider()
+        
+        if active_provider == "poe":
+             limit = await self.config.guild(guild).monthly_limit_points()
+             spend = await self.config.guild(guild).current_spend_points()
+             if limit is None: return True
+             return spend < limit
+        else:
+             limit = await self.config.guild(guild).monthly_limit()
+             spend = await self.config.guild(guild).current_spend()
+             if limit is None: return True
+             return spend < limit
+
+    async def _update_spend(self, guild: discord.Guild, cost: float, currency: str = "USD"):
+        """Update spend for guild."""
+        if cost <= 0: return
+        
+        if currency == "Points":
+            current = await self.config.guild(guild).current_spend_points()
+            if current is None: current = 0.0
+            new_spend = current + cost
+            await self.config.guild(guild).current_spend_points.set(new_spend)
+            log.info(f"Guild {guild.id} POINTS updated: {current} + {cost} -> {new_spend}")
+        else:
+            # Default to USD logic (legacy current_spend)
+            current = await self.config.guild(guild).current_spend()
+            if current is None: current = 0.0
+            new_spend = current + cost
+            await self.config.guild(guild).current_spend.set(new_spend)
+            log.info(f"Guild {guild.id} USD updated: {current} + {cost} -> {new_spend}")
     
     async def _init_client(self) -> None:
         """Initialize the LLM client based on configuration."""
@@ -355,6 +492,19 @@ class PoeHub(red_commands.Cog):
         # Load conversation history
         history = await self._get_conversation_messages(user.id, active_conv_id)
         
+        # --- Check Access & Budget ---
+        billing_guild = await self._resolve_billing_guild(user, target_channel)
+        if not billing_guild:
+            if ctx: await ctx.send("❌ Access denied. No authorized guild found for this context.")
+            elif isinstance(target_channel, discord.DMChannel): await target_channel.send("❌ Access denied. You do not share a server with the bot that permits DM usage.")
+            return
+
+        if not await self._check_budget(billing_guild):
+            msg = "❌ Monthly budget limit reached for this guild."
+            if ctx: await ctx.send(msg)
+            else: await target_channel.send(msg)
+            return
+        
         # --- Handle Quote / Reply Context ---
         quote_context = ""
         if message.reference and message.reference.message_id:
@@ -418,7 +568,8 @@ class PoeHub(red_commands.Cog):
             messages=messages,
             model=user_model,
             target_channel=target_channel,
-            save_to_conv=(user.id, active_conv_id)
+            save_to_conv=(user.id, active_conv_id),
+            billing_guild=billing_guild
         )
 
     async def _stream_response(
@@ -427,7 +578,8 @@ class PoeHub(red_commands.Cog):
         messages: List[Dict[str, Any]], 
         model: str,
         target_channel=None,
-        save_to_conv=None
+        save_to_conv=None,
+        billing_guild: discord.Guild = None
     ):
         """Stream the AI response and update Discord message."""
         # target_channel fallback
@@ -446,7 +598,15 @@ class PoeHub(red_commands.Cog):
             # Use the new client wrapper for streaming
             stream = self.client.stream_chat(model, messages)
             
-            async for content in stream:
+            async for item in stream:
+                if isinstance(item, TokenUsage):
+                    # Final usage object
+                    log.info(f"Got usage: {item} (Currency: {item.currency})")
+                    if billing_guild:
+                        await self._update_spend(billing_guild, item.cost, currency=item.currency)
+                    continue
+                
+                content = item
                 accumulated_content += content
                 
                 # Update message every 2 seconds to avoid rate limits
@@ -666,6 +826,40 @@ class PoeHub(red_commands.Cog):
         Equivalent to: [p]setkey poe <key>
         """
         await self.set_provider_key(ctx, "poe", api_key)
+
+    @red_commands.command(name="updatepricing")
+    @red_commands.is_owner()
+    async def update_pricing(self, ctx: red_commands.Context):
+        """
+        Manually trigger a pricing update from web/API sources.
+        """
+        msg = await ctx.send("🔄 Fetching latest pricing data (OpenRouter + LiteLLM Repository)...")
+        
+        # 1. Fetch from LiteLLM (Crawler)
+        crawler_rates = await PricingCrawler.fetch_rates()
+        count_crawler = len(crawler_rates)
+        
+        # 2. Fetch from OpenRouter (if client supports it)
+        openrouter_rates = {}
+        if self.client and hasattr(self.client, "fetch_openrouter_pricing"):
+            openrouter_rates = await self.client.fetch_openrouter_pricing()
+            
+        # Merge: OpenRouter takes precedence for its own models if overlap?
+        # Actually, let's just merge crawler first, then openrouter
+        final_rates = {}
+        final_rates.update(crawler_rates)
+        final_rates.update(openrouter_rates)
+        
+        if not final_rates:
+            await msg.edit(content="❌ Could not fetch any pricing data.")
+            return
+
+        PricingOracle.load_dynamic_rates(final_rates)
+        current_rates = await self.config.dynamic_rates()
+        current_rates.update(final_rates)
+        await self.config.dynamic_rates.set(current_rates)
+        
+        await msg.edit(content=f"✅ Pricing updated!\n- Fetched {count_crawler} rates from LiteLLM\n- Fetched {len(openrouter_rates)} rates from OpenRouter")
 
     @red_commands.command(name="poedummymode", aliases=["pdummy", "dummy"])
     @red_commands.is_owner()
