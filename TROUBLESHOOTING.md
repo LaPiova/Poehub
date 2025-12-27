@@ -82,18 +82,18 @@ Error: No module named 'poehub'
 [p]paths
 ```
 
-If `/home/ubuntu/red-cogs` is not listed (use absolute path):
+If your `red-cogs` path is not listed (use absolute path):
 ```
-[p]addpath /home/ubuntu/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 ```
 *Note: Relative paths like ~/red-cogs don't work*
 
 2. **Verify files exist:**
 ```bash
-ls -la /home/ubuntu/red-cogs/poehub/
+ls -la /home/<your-user>/red-cogs/poehub/
 ```
 
-Should see: `poehub.py`, `api_client.py`, `conversation_manager.py`, `encryption.py`, `__init__.py`, `info.json`
+Should see: `poehub.py`, `api_client.py`, `conversation_manager.py`, `encryption.py`, `__init__.py`, `info.json`, and a `ui/` folder
 
 3. **Sync files again:**
 ```bash
@@ -281,7 +281,7 @@ If that doesn't work, clear all config data (owner only):
 ```
 [p]unload poehub
 # Remove config directory
-rm -rf ~/.local/share/Red-DiscordBot/data/PoeBot/cogs/PoeHub/
+rm -rf ~/.local/share/Red-DiscordBot/data/${POEHUB_REDBOT_INSTANCE:-PoeBot}/cogs/PoeHub/
 [p]load poehub
 [p]poeapikey YOUR_KEY
 ```
@@ -418,7 +418,7 @@ python verify_installation.py
 ### Check Config Files
 
 ```bash
-ls -la ~/.local/share/Red-DiscordBot/data/PoeBot/cogs/PoeHub/
+ls -la ~/.local/share/Red-DiscordBot/data/${POEHUB_REDBOT_INSTANCE:-PoeBot}/cogs/PoeHub/
 ```
 
 ---
@@ -475,7 +475,7 @@ screen -X -S poebot quit
 rm -rf ~/.redenv
 
 # 4. Remove bot data (OPTIONAL - loses all config)
-# rm -rf ~/.local/share/Red-DiscordBot/data/PoeBot
+# rm -rf ~/.local/share/Red-DiscordBot/data/${POEHUB_REDBOT_INSTANCE:-PoeBot}
 
 # 5. Run fix script
 cd ~/Poehub
@@ -488,10 +488,11 @@ redbot-setup
 ~/start_bot.sh
 
 # 8. In Discord:
-[p]addpath ~/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 [p]load poehub
 [p]poeapikey YOUR_KEY
 ```
+*Note: `addpath` requires an absolute path (not `~/`). Use `~/Poehub/GET_PATH.sh` to print the correct command for your machine.*
 
 ---
 

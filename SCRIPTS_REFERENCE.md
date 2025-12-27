@@ -77,7 +77,7 @@ screen -ls              # List all sessions
 - First time setup
 
 **What it does:**
-- Copies files from ~/Poehub to ~/red-cogs/poehub
+- Copies files from `~/Poehub/src/poehub/` to `$HOME/red-cogs/poehub/`
 - Shows file list
 - Displays next steps
 
@@ -93,7 +93,7 @@ screen -ls              # List all sessions
 
 **Output:**
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 ```
 
 ---
@@ -161,7 +161,7 @@ python ~/Poehub/verify_installation.py
 # Follow prompts for Discord token and prefix
 
 # 3. In Discord:
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_KEY
 
@@ -175,7 +175,7 @@ Ctrl+C
 ### Updating PoeHub Code
 ```bash
 # 1. Edit files in ~/Poehub/
-vim ~/Poehub/poehub.py
+vim ~/Poehub/src/poehub/poehub.py
 
 # 2. Sync to red-cogs
 ~/Poehub/sync_to_red.sh

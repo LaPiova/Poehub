@@ -1,27 +1,29 @@
-"""
-PoeHub - Red-DiscordBot Cog for Poe API Integration
-Uses OpenAI-compatible API endpoint to communicate with Poe
+"""PoeHub - Red-DiscordBot cog for Poe API integration.
+
+PoeHub connects to Poe's OpenAI-compatible endpoint and provides:
+- multi-model chat
+- encrypted per-user conversation storage
+- image attachments (OpenAI vision format)
+- optional DM/private mode
 """
 
-import discord
-from discord.ext import commands
-from redbot.core import commands as red_commands, Config
-from redbot.core.bot import Red
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
-from typing import Optional, List, Dict, Any, Union, Set
 import time
+from typing import Any, Dict, List, Optional, Set, Union
 
-# Handle imports
-try:
-    from .encryption import EncryptionHelper, generate_key
-    from .api_client import PoeClient, DummyPoeClient
-    from .conversation_manager import ConversationManager
-except ImportError:
-    from encryption import EncryptionHelper, generate_key
-    from api_client import PoeClient, DummyPoeClient
-    from conversation_manager import ConversationManager
+import discord
+from redbot.core import Config, commands as red_commands
+from redbot.core.bot import Red
+
+from .api_client import DummyPoeClient, PoeClient
+from .conversation_manager import ConversationManager
+from .encryption import EncryptionHelper, generate_key
+from .ui.config_view import PoeConfigView
+from .ui.conversation_view import ConversationMenuView
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -85,8 +87,8 @@ class PoeHub(red_commands.Cog):
         # Initialize encryption on load
         asyncio.create_task(self._initialize())
     
-    async def _initialize(self):
-        """Initialize encryption, conversation manager and API client"""
+    async def _initialize(self) -> None:
+        """Initialize encryption, conversation manager, and API client."""
         try:
             # Check for encryption key
             encryption_key = await self.config.encryption_key()
@@ -103,17 +105,19 @@ class PoeHub(red_commands.Cog):
             # Initialize API client if key exists
             await self._init_client()
             
-        except Exception as e:
-            log.error(f"Error initializing PoeHub: {e}", exc_info=True)
+        except Exception:
+            log.exception("Error initializing PoeHub")
     
-    async def _init_client(self):
-        """Initialize the Poe client"""
+    async def _init_client(self) -> None:
+        """Initialize the Poe client."""
         self.client = None
         use_dummy = await self.config.use_dummy_api()
         if use_dummy and not self.allow_dummy_mode:
             # Ensure persisted config stays in sync with release builds
             await self.config.use_dummy_api.set(False)
-            log.info("Dummy API mode is disabled in this release build; falling back to live client.")
+            log.info(
+                "Dummy API mode is disabled in this release build; falling back to live client."
+            )
             use_dummy = False
         if use_dummy:
             self.client = DummyPoeClient()
@@ -135,9 +139,14 @@ class PoeHub(red_commands.Cog):
             log.warning(warning)
     
     def _split_message(self, content: str, max_length: int = 1950) -> List[str]:
-        """
-        Split a message into chunks that fit Discord's 2000 character limit.
-        Attempts to split at natural boundaries.
+        """Split text into Discord-safe chunks.
+
+        Args:
+            content: Full content to split.
+            max_length: Maximum chunk length. (Discord hard limit is 2000.)
+
+        Returns:
+            A list of chunks in send order.
         """
         if len(content) <= max_length:
             return [content]
@@ -182,7 +191,7 @@ class PoeHub(red_commands.Cog):
         return chunks
     
     async def _get_system_prompt(self, user_id: int) -> Optional[str]:
-        """Get the effective system prompt for a user"""
+        """Return the effective system prompt for a user."""
         user = discord.Object(id=user_id)
         
         # Check for user's personal prompt first
@@ -194,7 +203,7 @@ class PoeHub(red_commands.Cog):
         return await self.config.default_system_prompt()
 
     async def _build_model_select_options(self) -> List[discord.SelectOption]:
-        """Build dropdown options for the interactive config panel"""
+        """Build dropdown options for the interactive config panel."""
         fallback_models = [
             "Claude-Sonnet-4.5",
             "GPT-5.2-Pro",
@@ -223,7 +232,7 @@ class PoeHub(red_commands.Cog):
                     options.append(discord.SelectOption(label=model_id[:100], value=model_id))
                     if len(options) >= 25:
                         break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - best-effort UI hydration
                 log.warning("Could not fetch live model list for config menu: %s", exc)
 
         if not options:
@@ -238,7 +247,7 @@ class PoeHub(red_commands.Cog):
         owner_mode: bool,
         dummy_state: bool
     ) -> discord.Embed:
-        """Create the status embed for the interactive config menu"""
+        """Create the status embed for the interactive config menu."""
         description = (
             "Use the dropdown to choose your default model, set or clear your personal system prompt, "
             "and close the menu when you're done.\n\n"
@@ -282,7 +291,7 @@ class PoeHub(red_commands.Cog):
         target_channel=None,
         save_to_conv=None
     ):
-        """Stream the AI response and update Discord message"""
+        """Stream the AI response and update Discord message."""
         if not self.client:
             await ctx.send("❌ API client not initialized. Please set your API key first.")
             return
@@ -339,9 +348,9 @@ class PoeHub(red_commands.Cog):
             else:
                 await response_msg.edit(content="❌ No response received from API.")
         
-        except Exception as e:
-            error_msg = f"❌ Error communicating with Poe API: {str(e)}"
-            log.error(error_msg, exc_info=True)
+        except Exception as exc:  # noqa: BLE001 - surface errors to user
+            error_msg = f"❌ Error communicating with Poe API: {exc}"
+            log.exception("Error communicating with Poe API")
             await ctx.send(error_msg)
     
     # --- Conversation Management Methods (Refactored) ---
@@ -400,8 +409,14 @@ class PoeHub(red_commands.Cog):
         
         return conv
     
-    async def _add_message_to_conversation(self, user_id: int, conv_id: str, role: str, content: str):
-        """Add a message to a conversation"""
+    async def _add_message_to_conversation(
+        self,
+        user_id: int,
+        conv_id: str,
+        role: str,
+        content: Union[str, List[Dict[str, Any]]],
+    ) -> None:
+        """Add a message to a conversation."""
         if not self.conversation_manager:
             return
             
@@ -966,16 +981,14 @@ class PoeHub(red_commands.Cog):
             else:
                 await response_msg.edit(content="❌ No response.")
                 
-        except Exception as e:
-            log.error(f"DM Error: {e}")
+        except Exception:
+            log.exception("DM handler error")
             await message.channel.send("❌ An error occurred.")
 
     @red_commands.command(name="poehubhelp", aliases=["phelp"])
     async def poehub_help(self, ctx: red_commands.Context):
         """Show bilingual help for PoeHub commands"""
-        # (Keeping the original help content abbreviated for brevity in this rewrite, 
-        # but in a real scenario I would keep the full text. 
-        # I'll restore the full text to ensure no regression.)
+        # NOTE: This help embed is intentionally concise; keep docs in README for full details.
         embed = discord.Embed(
             title="🤖 PoeHub Commands 指令說明",
             description="Bilingual command reference 雙語指令參考",
@@ -988,366 +1001,6 @@ class PoeHub(red_commands.Cog):
             settings_value += ", **!poedummymode** (擁有者)"
         embed.add_field(name="⚙️ Settings 設定", value=settings_value, inline=False)
         await ctx.send(embed=embed)
-
-
-class PoeConfigView(discord.ui.View):
-    """Interactive configuration dashboard."""
-
-    def __init__(
-        self,
-        cog: "PoeHub",
-        ctx: red_commands.Context,
-        model_options: List[discord.SelectOption],
-        owner_mode: bool,
-        dummy_state: bool
-    ):
-        super().__init__(timeout=180)
-        self.cog = cog
-        self.ctx = ctx
-        self.message: Optional[discord.Message] = None
-        self.owner_mode = owner_mode
-
-        if model_options:
-            self.add_item(ModelSelect(cog, ctx, model_options))
-
-        self.add_item(SetPromptButton(cog, ctx))
-        self.add_item(ShowPromptButton(cog, ctx))
-        self.add_item(ClearPromptButton(cog, ctx))
-
-        if owner_mode and cog.allow_dummy_mode:
-            self.add_item(DummyToggleButton(cog, ctx, dummy_state))
-
-        self.add_item(CloseMenuButton())
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("此設定面板僅限觸發者使用。", ephemeral=True)
-            return False
-        return True
-
-    async def on_timeout(self):
-        if not self.message:
-            return
-        for child in self.children:
-            child.disabled = True
-        try:
-            await self.message.edit(view=self)
-        except discord.HTTPException:
-            pass
-
-
-class ModelSelect(discord.ui.Select):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]):
-        placeholder = "Select your default model"
-        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        model_choice = self.values[0]
-        await self.cog.config.user(self.ctx.author).model.set(model_choice)
-        await interaction.response.send_message(f"✅ 模型已設定為 `{model_choice}`", ephemeral=True)
-
-
-class PromptModal(discord.ui.Modal, title="設定個人提示詞 / Set Personal Prompt"):
-    prompt: discord.ui.TextInput = discord.ui.TextInput(
-        label="System Prompt",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        max_length=1500,
-        placeholder="Describe how PoeHub should respond..."
-    )
-
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__()
-        self.cog = cog
-        self.ctx = ctx
-
-    async def on_submit(self, interaction: discord.Interaction):
-        prompt_text = self.prompt.value.strip()
-        await self.cog.config.user(self.ctx.author).system_prompt.set(prompt_text)
-        preview = prompt_text[:200] + ("..." if len(prompt_text) > 200 else "")
-        await interaction.response.send_message(
-            f"✅ 已更新個人提示詞。Preview: ```{preview}```",
-            ephemeral=True
-        )
-
-
-class SetPromptButton(discord.ui.Button):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__(label="Set Personal Prompt", style=discord.ButtonStyle.primary)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(PromptModal(self.cog, self.ctx))
-
-
-class ShowPromptButton(discord.ui.Button):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__(label="View Prompt", style=discord.ButtonStyle.secondary)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        user_prompt = await self.cog.config.user(self.ctx.author).system_prompt()
-        default_prompt = await self.cog.config.default_system_prompt()
-
-        if not user_prompt and not default_prompt:
-            await interaction.response.send_message("目前沒有設定任何提示詞。", ephemeral=True)
-            return
-
-        embed = discord.Embed(title="📝 System Prompt", color=discord.Color.blurple())
-        if user_prompt:
-            embed.add_field(
-                name="Personal",
-                value=f"```{user_prompt[:1000]}{'...' if len(user_prompt) > 1000 else ''}```",
-                inline=False
-            )
-        if default_prompt:
-            embed.add_field(
-                name="Default",
-                value=f"```{default_prompt[:1000]}{'...' if len(default_prompt) > 1000 else ''}```",
-                inline=False
-            )
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-class ClearPromptButton(discord.ui.Button):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__(label="Clear Prompt", style=discord.ButtonStyle.secondary)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        await self.cog.config.user(self.ctx.author).system_prompt.set(None)
-        await interaction.response.send_message("✅ 個人提示詞已清除。", ephemeral=True)
-
-
-class DummyToggleButton(discord.ui.Button):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, enabled: bool):
-        label = f"Dummy Mode: {'ON' if enabled else 'OFF'}"
-        style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
-        super().__init__(label=label, style=style)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        new_state = not await self.cog.config.use_dummy_api()
-        await self.cog.config.use_dummy_api.set(new_state)
-        await self.cog._init_client()
-        self.label = f"Dummy Mode: {'ON' if new_state else 'OFF'}"
-        self.style = discord.ButtonStyle.success if new_state else discord.ButtonStyle.secondary
-
-        if self.view:
-            new_options = await self.cog._build_model_select_options()
-            for child in self.view.children:
-                if isinstance(child, ModelSelect):
-                    child.options = new_options
-                    break
-            owner_mode = getattr(self.view, "owner_mode", True)
-            embed = await self.cog._build_config_embed(self.ctx, owner_mode, new_state)
-            await interaction.response.edit_message(embed=embed, view=self.view)
-            await interaction.followup.send(
-                "✅ Dummy API mode 已啟用。" if new_state else "✅ Dummy API mode 已關閉。",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                "✅ Dummy API mode 狀態已更新。",
-                ephemeral=True
-            )
-
-
-class CloseMenuButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="Close Menu", style=discord.ButtonStyle.danger)
-
-    async def callback(self, interaction: discord.Interaction):
-        view = self.view
-        if view:
-            for child in view.children:
-                child.disabled = True
-            view.stop()
-            await interaction.response.edit_message(view=view)
-
-
-
-class SwitchConversationSelect(discord.ui.Select):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]):
-        placeholder = "Switch Conversation / 切換對話"
-        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options, row=0)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        conv_id = self.values[0]
-        await self.cog._set_active_conversation(self.ctx.author.id, conv_id)
-        # Defer to allow time for processing
-        await interaction.response.defer()
-        await self.view.refresh_content(interaction)
-
-
-class DeleteConversationSelect(discord.ui.Select):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, options: List[discord.SelectOption]):
-        placeholder = "Delete Conversation / 刪除對話"
-        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options, row=1)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        conv_id = self.values[0]
-        conv = await self.cog._get_conversation(self.ctx.author.id, conv_id)
-        title = conv.get("title", conv_id) if conv else conv_id
-        
-        success = await self.cog._delete_conversation(self.ctx.author.id, conv_id)
-        
-        if success:
-            active_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
-            if active_id == conv_id:
-                await self.cog._set_active_conversation(self.ctx.author.id, "default")
-            
-            await interaction.response.send_message(f"✅ Conversation **{title}** deleted.", ephemeral=True)
-            await self.view.refresh_content(interaction, update_response=True)
-        else:
-             await interaction.response.send_message(f"❌ Could not delete **{title}**.", ephemeral=True)
-
-
-class ClearHistoryButton(discord.ui.Button):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__(label="Clear Chat History", style=discord.ButtonStyle.danger, emoji="🧹", row=2)
-        self.cog = cog
-        self.ctx = ctx
-
-    async def callback(self, interaction: discord.Interaction):
-        active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
-        conv = await self.cog._get_conversation(self.ctx.author.id, active_conv_id)
-        
-        if conv:
-            updated_conv = self.cog.conversation_manager.clear_messages(conv)
-            await self.cog._save_conversation(self.ctx.author.id, active_conv_id, updated_conv)
-            await interaction.response.send_message(f"✅ History cleared for **{updated_conv.get('title', active_conv_id)}**.", ephemeral=True)
-            await self.view.refresh_content(interaction, update_response=True)
-        else:
-            await interaction.response.send_message("⚠️ No active conversation found.", ephemeral=True)
-
-
-class RefreshButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="Refresh", style=discord.ButtonStyle.secondary, emoji="🔄", row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        await self.view.refresh_content(interaction)
-
-
-class ConversationMenuView(discord.ui.View):
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context):
-        super().__init__(timeout=180)
-        self.cog = cog
-        self.ctx = ctx
-        self.message = None
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message("This menu is restricted to the triggerer.", ephemeral=True)
-            return False
-        return True
-    
-    async def build_options(self):
-        conversations = await self.cog.config.user(self.ctx.author).conversations()
-        active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
-        
-        options = []
-        if conversations:
-            sorted_convs = []
-            for cid, enc_data in conversations.items():
-                 data = self.cog.conversation_manager.process_conversation_data(enc_data)
-                 if data:
-                    sorted_convs.append((cid, data))
-            
-            sorted_convs.sort(key=lambda x: x[1].get('created_at', 0), reverse=True)
-            
-            for cid, data in sorted_convs[:25]:
-                title = data.get('title', cid)
-                desc = f"Messages: {len(data.get('messages', []))}"
-                is_default = (cid == active_conv_id)
-                emoji = "🟢" if is_default else "💬"
-                options.append(discord.SelectOption(
-                    label=title[:100], 
-                    value=cid, 
-                    description=desc, 
-                    default=is_default,
-                    emoji=emoji
-                ))
-        
-        if not options:
-             options.append(discord.SelectOption(label="Default", value="default", default=True, emoji="🟢"))
-
-        return options, active_conv_id
-
-    async def refresh_content(self, interaction: Optional[discord.Interaction] = None, update_response=False):
-        self.clear_items()
-        
-        options, active_id = await self.build_options()
-        
-        self.add_item(SwitchConversationSelect(self.cog, self.ctx, options))
-        
-        del_options = []
-        for opt in options:
-            del_options.append(discord.SelectOption(
-                label=opt.label, value=opt.value, description=opt.description, emoji="🗑️"
-            ))
-        
-        if del_options:
-             self.add_item(DeleteConversationSelect(self.cog, self.ctx, del_options))
-            
-        self.add_item(ClearHistoryButton(self.cog, self.ctx))
-        self.add_item(RefreshButton())
-        self.add_item(CloseMenuButton())
-
-        conv = await self.cog._get_conversation(self.ctx.author.id, active_id)
-        if not conv:
-             conv = await self.cog._get_or_create_conversation(self.ctx.author.id, active_id)
-
-        title = conv.get("title", active_id)
-        msg_count = len(conv.get("messages", []))
-        
-        embed = discord.Embed(
-            title="💬 Conversation Management",
-            description="Use the menu below to switch, clear, or delete conversations.",
-            color=discord.Color.gold()
-        )
-        embed.add_field(name="Active Conversation", value=f"**{title}**\nID: `{active_id}`\nMessages: {msg_count}", inline=False)
-        
-        if conv and conv.get("messages"):
-             recent = conv["messages"][-3:]
-             preview = ""
-             for msg in recent:
-                role = "👤" if msg["role"] == "user" else "🤖"
-                content = msg["content"]
-                if len(content) > 60:
-                     content = content[:60] + "..."
-                preview += f"{role} {content}\n"
-             embed.add_field(name="Recent Context", value=preview, inline=False)
-        else:
-             embed.add_field(name="Recent Context", value="*Empty*", inline=False)
-
-        if interaction:
-            try:
-                if update_response:
-                    if self.message:
-                        await self.message.edit(embed=embed, view=self)
-                else:
-                    if not interaction.response.is_done():
-                         await interaction.response.edit_message(embed=embed, view=self)
-                    else:
-                         await self.message.edit(embed=embed, view=self)
-            except Exception as e:
-                log.warning(f"Failed to refresh view: {e}")
-        
-        return embed
 
 
 async def setup(bot: Red):

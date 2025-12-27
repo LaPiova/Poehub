@@ -1,0 +1,19 @@
+# Tooling configuration for PoeHub.
+#
+# This repo follows (a close approximation of) the Google Python Style Guide.
+# Use `yapf` + `isort` if you want an auto-formatter/import-sorter that matches
+# Google conventions.
+
+[tool.yapf]
+based_on_style = "google"
+column_limit = 80
+dedent_closing_brackets = true
+coalesce_brackets = true
+
+[tool.isort]
+profile = "google"
+line_length = 80
+known_first_party = ["poehub"]
+src_paths = ["src"]
+
+

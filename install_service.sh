@@ -18,6 +18,9 @@ echo -e "${GREEN}  Installing PoeBot System Service${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
+INSTANCE_NAME="${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
+
 # Check if running as root
 if [ "$EUID" -eq 0 ]; then 
     echo -e "${RED}✗${NC} Do NOT run this script as root/sudo"
@@ -34,13 +37,13 @@ if [ ! -d "$HOME/.redenv" ]; then
 fi
 
 # Create systemd service file
-SERVICE_FILE="/tmp/poebot.service"
+SERVICE_FILE="/tmp/${SERVICE_NAME}.service"
 
 echo -e "${BLUE}Creating service file...${NC}"
 
 cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=PoeBot - Red-DiscordBot with Poe API Integration
+Description=${INSTANCE_NAME} - Red-DiscordBot with Poe API Integration
 After=network-online.target
 Wants=network-online.target
 
@@ -49,12 +52,12 @@ Type=simple
 User=$USER
 WorkingDirectory=$HOME
 Environment="PATH=$HOME/.redenv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$HOME/.redenv/bin/redbot PoeBot --no-prompt
+ExecStart=$HOME/.redenv/bin/redbot ${INSTANCE_NAME} --no-prompt
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=poebot
+SyslogIdentifier=${SERVICE_NAME}
 
 # Security settings
 NoNewPrivileges=true
@@ -68,8 +71,8 @@ echo -e "${GREEN}✓${NC} Service file created"
 
 # Install service file
 echo -e "${BLUE}Installing service (requires sudo)...${NC}"
-sudo cp "$SERVICE_FILE" /etc/systemd/system/poebot.service
-sudo chmod 644 /etc/systemd/system/poebot.service
+sudo cp "$SERVICE_FILE" "/etc/systemd/system/${SERVICE_NAME}.service"
+sudo chmod 644 "/etc/systemd/system/${SERVICE_NAME}.service"
 
 echo -e "${GREEN}✓${NC} Service file installed"
 
@@ -81,7 +84,7 @@ echo -e "${GREEN}✓${NC} Systemd reloaded"
 
 # Enable service
 echo -e "${BLUE}Enabling service to start on boot...${NC}"
-sudo systemctl enable poebot.service
+sudo systemctl enable "${SERVICE_NAME}.service"
 
 echo -e "${GREEN}✓${NC} Service enabled"
 
@@ -91,20 +94,20 @@ echo -e "${GREEN}✓ Installation Complete!${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 echo "Service Commands:"
-echo "  ${GREEN}Start bot:${NC}      sudo systemctl start poebot"
-echo "  ${GREEN}Stop bot:${NC}       sudo systemctl stop poebot"
-echo "  ${GREEN}Restart bot:${NC}    sudo systemctl restart poebot"
-echo "  ${GREEN}Check status:${NC}   sudo systemctl status poebot"
-echo "  ${GREEN}View logs:${NC}      sudo journalctl -u poebot -f"
-echo "  ${GREEN}Disable autostart:${NC} sudo systemctl disable poebot"
+echo "  ${GREEN}Start bot:${NC}      sudo systemctl start ${SERVICE_NAME}"
+echo "  ${GREEN}Stop bot:${NC}       sudo systemctl stop ${SERVICE_NAME}"
+echo "  ${GREEN}Restart bot:${NC}    sudo systemctl restart ${SERVICE_NAME}"
+echo "  ${GREEN}Check status:${NC}   sudo systemctl status ${SERVICE_NAME}"
+echo "  ${GREEN}View logs:${NC}      sudo journalctl -u ${SERVICE_NAME} -f"
+echo "  ${GREEN}Disable autostart:${NC} sudo systemctl disable ${SERVICE_NAME}"
 echo ""
 echo -e "${YELLOW}Note:${NC} Bot will now start automatically when server boots"
 echo ""
 echo "Start the bot now? (y/n)"
 read -r response
 if [[ "$response" =~ ^[Yy]$ ]]; then
-    sudo systemctl start poebot
+    sudo systemctl start "${SERVICE_NAME}"
     sleep 2
-    sudo systemctl status poebot --no-pager
+    sudo systemctl status "${SERVICE_NAME}" --no-pager
 fi
 

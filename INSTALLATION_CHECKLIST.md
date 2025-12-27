@@ -33,12 +33,14 @@ ls -la
 ```
 
 You should see these files:
-- [ ] `poehub.py` (Main cog)
-- [ ] `api_client.py` (API interaction layer)
-- [ ] `conversation_manager.py` (State management layer)
-- [ ] `encryption.py` (Encryption helper)
-- [ ] `__init__.py` (Package init)
-- [ ] `info.json` (Cog metadata)
+- [ ] `src/poehub/` (Cog package source)
+- [ ] `src/poehub/poehub.py` (Main cog)
+- [ ] `src/poehub/api_client.py` (API interaction layer)
+- [ ] `src/poehub/conversation_manager.py` (State management layer)
+- [ ] `src/poehub/encryption.py` (Encryption helper)
+- [ ] `src/poehub/ui/` (Discord UI views)
+- [ ] `src/poehub/__init__.py` (Package init)
+- [ ] `src/poehub/info.json` (Cog metadata)
 - [ ] `requirements.txt` (Dependencies)
 - [ ] `deploy_poe_bot.sh` (Deployment script, executable)
 - [ ] `start_bot.sh` (Startup script, executable)
@@ -61,7 +63,7 @@ Check for:
 - [ ] Red-DiscordBot installed
 - [ ] Dependencies installed (openai, cryptography)
 - [ ] Red-DiscordBot setup completed (you'll be prompted)
-- [ ] Cog files copied to `~/red-cogs/poehub/`
+- [ ] Cog files copied to `$HOME/red-cogs/poehub/`
 - [ ] Startup scripts created (`~/start_bot.sh`, `~/start_bot_screen.sh`)
 
 ## ✅ Dependency Verification
@@ -109,11 +111,11 @@ screen -r poebot
 ~/Poehub/sync_to_red.sh
 ```
 - [ ] Files copied successfully
-- [ ] All 4 files present in ~/red-cogs/poehub/
+- [ ] All files present in `$HOME/red-cogs/poehub/`
 
 ### 2. In Discord, Add Cog Path
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 ```
 *Important: Use absolute path, not ~/red-cogs (relative paths not supported)*
 
@@ -205,7 +207,7 @@ Hello, bot!
 ### Encryption Verification
 Check config directory:
 ```bash
-ls -la ~/.local/share/Red-DiscordBot/data/PoeBot/
+ls -la ~/.local/share/Red-DiscordBot/data/${POEHUB_REDBOT_INSTANCE:-PoeBot}/
 ```
 - [ ] Config files exist
 - [ ] Encryption key stored in global config
@@ -215,11 +217,11 @@ ls -la ~/.local/share/Red-DiscordBot/data/PoeBot/
 
 ### Systemd Service (Optional)
 ```bash
-sudo cp ~/poebot.service /etc/systemd/system/
+sudo cp ~/${POEHUB_SERVICE_NAME:-poebot}.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable poebot.service
-sudo systemctl start poebot.service
-sudo systemctl status poebot.service
+sudo systemctl enable ${POEHUB_SERVICE_NAME:-poebot}.service
+sudo systemctl start ${POEHUB_SERVICE_NAME:-poebot}.service
+sudo systemctl status ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 - [ ] Service file installed
 - [ ] Service enabled
@@ -228,14 +230,14 @@ sudo systemctl status poebot.service
 
 ### Auto-Restart on Reboot
 ```bash
-sudo systemctl is-enabled poebot.service
+sudo systemctl is-enabled ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 - [ ] Returns "enabled"
 - [ ] Bot will auto-start on server reboot
 
 ### Log Monitoring
 ```bash
-sudo journalctl -u poebot.service -f
+sudo journalctl -u ${POEHUB_SERVICE_NAME:-poebot}.service -f
 ```
 - [ ] Logs display correctly
 - [ ] No critical errors
@@ -248,7 +250,7 @@ If any checks fail:
 ### Bot won't load cog
 ```bash
 # Check cog files
-ls -la ~/red-cogs/poehub/
+ls -la "$HOME/red-cogs/poehub/"
 
 # Verify path
 [p]paths
@@ -278,12 +280,12 @@ pip install --upgrade Red-DiscordBot openai cryptography
 screen -ls
 
 # Or check systemd
-sudo systemctl status poebot.service
+sudo systemctl status ${POEHUB_SERVICE_NAME:-poebot}.service
 
 # Restart
 ~/start_bot_screen.sh
 # OR
-sudo systemctl restart poebot.service
+sudo systemctl restart ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 
 ## ✅ Performance Verification

@@ -15,6 +15,8 @@ echo -e "${GREEN}  Starting PoeBot...${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
+INSTANCE_NAME="${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+
 # Activate virtual environment
 if [ -d "$HOME/.redenv" ]; then
     source "$HOME/.redenv/bin/activate"
@@ -26,9 +28,9 @@ else
 fi
 
 # Start the bot
-echo -e "${BLUE}Starting Red-DiscordBot instance 'PoeBot'...${NC}"
+echo -e "${BLUE}Starting Red-DiscordBot instance '${INSTANCE_NAME}'...${NC}"
 echo ""
-redbot PoeBot
+redbot "$INSTANCE_NAME"
 
 # Deactivate venv on exit
 deactivate

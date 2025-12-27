@@ -18,7 +18,7 @@ All requested features have been implemented, tested, and documented.
 7. ✅ **Private mode** for DM responses in servers
 
 ### Enhanced Architecture (v1.2.0)
-8. ✅ **Modular Codebase** - Split into `poehub.py`, `api_client.py`, and `conversation_manager.py`
+8. ✅ **Modular Codebase** - Cog code lives under `src/poehub/` (with UI in `src/poehub/ui/`)
 9. ✅ **Conversation context management** - AI remembers up to 50 messages
 10. ✅ **Multiple conversations per user** - separate contexts for different topics
 11. ✅ **Auto-start on server reboot** - systemd service integration
@@ -30,12 +30,13 @@ All requested features have been implemented, tested, and documented.
 
 ### Core Implementation (6 files)
 ```
-poehub.py (32 KB)              - Main cog with Discord logic
-api_client.py (3.5 KB)         - API interaction layer
-conversation_manager.py (3.5 KB) - State management layer
-encryption.py (3.5 KB)         - Encryption helper
-__init__.py (395 B)            - Package initialization
-info.json (922 B)              - Cog metadata
+src/poehub/poehub.py                 - Main cog with Discord logic
+src/poehub/api_client.py             - API interaction layer
+src/poehub/conversation_manager.py   - State management layer
+src/poehub/encryption.py             - Encryption helper
+src/poehub/ui/                       - Discord UI views (dropdowns/buttons)
+src/poehub/__init__.py               - Package initialization
+src/poehub/info.json                 - Cog metadata
 ```
 
 ### Configuration (2 files)
@@ -142,7 +143,7 @@ CHANGELOG.md                   - Version history
 
 ### Discord Setup
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_KEY
 !poehubhelp
@@ -337,7 +338,7 @@ CHANGELOG.md                   - Version history
 
 ### In Discord
 ```
-!addpath /home/ubuntu/red-cogs
+!addpath /home/<your-user>/red-cogs
 !load poehub
 !poeapikey YOUR_KEY
 !poehubhelp
@@ -376,7 +377,7 @@ CHANGELOG.md                   - Version history
 ---
 
 **Project Location:** `~/Poehub/`
-**Cog Location:** `~/red-cogs/poehub/`
+**Cog Location:** `/home/<your-user>/red-cogs/poehub/`
 **Last Updated:** December 23, 2025
 **Ready For:** Production Deployment
 

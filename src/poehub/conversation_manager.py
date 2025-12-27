@@ -1,26 +1,31 @@
-import time
-import logging
-from typing import Dict, List, Any, Optional, Union
+"""Conversation state management for PoeHub."""
 
-try:
-    from .encryption import EncryptionHelper
-except ImportError:
-    from encryption import EncryptionHelper
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Dict, List, Optional, Union
+
+from .encryption import EncryptionHelper
 
 log = logging.getLogger("red.poehub.conversation")
 
+
 class ConversationManager:
-    """
-    Manages conversation state, data structure, and encryption/decryption
-    """
-    
-    def __init__(self, encryption: EncryptionHelper):
+    """Manages conversation state and encryption/decryption."""
+
+    def __init__(self, encryption: EncryptionHelper) -> None:
         self.encryption = encryption
 
     def process_conversation_data(self, data: Any) -> Optional[Dict[str, Any]]:
-        """
-        Decrypts and validates conversation data.
-        Handles both encrypted strings and raw dicts (for backward compatibility or uncrypted modes).
+        """Decrypt and validate conversation data.
+
+        Args:
+            data: Stored conversation payload; may be an encrypted string or a
+                raw dict (backwards compatibility).
+
+        Returns:
+            The decoded conversation dict, or None if invalid/decryption failed.
         """
         if data is None:
             return None
@@ -33,23 +38,19 @@ class ConversationManager:
                     log.error("Failed to decrypt conversation data")
                     return None
                 return decrypted
-            except Exception as e:
-                log.error(f"Error decrypting conversation: {e}")
+            except Exception as exc:  # noqa: BLE001 - corrupted payloads happen
+                log.warning("Error decrypting conversation: %s", exc)
                 return None
         
         # Return as is if it's already a dict
         return data
 
     def prepare_for_storage(self, conversation: Dict[str, Any]) -> str:
-        """
-        Encrypts conversation data for storage.
-        """
+        """Encrypt conversation data for storage."""
         return self.encryption.encrypt(conversation)
 
-    def create_conversation(self, conv_id: str, title: str = None) -> Dict[str, Any]:
-        """
-        Creates a new initialized conversation structure.
-        """
+    def create_conversation(self, conv_id: str, title: Optional[str] = None) -> Dict[str, Any]:
+        """Create a new initialized conversation structure."""
         return {
             "id": conv_id,
             "created_at": time.time(),
@@ -58,25 +59,29 @@ class ConversationManager:
         }
 
     def add_message(
-        self, 
-        conversation: Dict[str, Any], 
-        role: str, 
-        content: Union[str, List[Dict[str, Any]]],  # Can be str or List[Dict] for images
-        max_history: int = 50
+        self,
+        conversation: Dict[str, Any],
+        role: str,
+        content: Union[str, List[Dict[str, Any]]],
+        max_history: int = 50,
     ) -> Dict[str, Any]:
-        """
-        Adds a message to the conversation and maintains the history limit.
-        Content can be a string or a structured content array (for images).
-        Returns the updated conversation object.
+        """Append a message and enforce the history limit.
+
+        Args:
+            conversation: Conversation dict to update in-place.
+            role: OpenAI role ("user", "assistant", "system").
+            content: Either a plain string or an OpenAI-Vision content array.
+            max_history: Maximum number of messages to retain.
+
+        Returns:
+            The updated conversation dict.
         """
         if "messages" not in conversation:
             conversation["messages"] = []
             
-        conversation["messages"].append({
-            "role": role,
-            "content": content,
-            "timestamp": time.time()
-        })
+        conversation["messages"].append(
+            {"role": role, "content": content, "timestamp": time.time()}
+        )
         
         # Prune old messages to avoid context window issues
         if len(conversation["messages"]) > max_history:
@@ -85,30 +90,24 @@ class ConversationManager:
         return conversation
 
     def clear_messages(self, conversation: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Clears all messages from the conversation.
-        Returns the updated conversation object.
-        """
+        """Clear all messages from the conversation."""
         conversation["messages"] = []
         return conversation
 
     def get_api_messages(self, conversation: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Extracts messages formatted specifically for the OpenAI/Poe API.
-        Removes timestamps and internal metadata.
-        """
+        """Return messages formatted for the OpenAI/Poe API."""
         if not conversation or "messages" not in conversation:
             return []
             
         return [
-            {"role": msg["role"], "content": msg["content"]} 
+            {"role": msg["role"], "content": msg["content"]}
             for msg in conversation["messages"]
         ]
 
     def get_title(self, conversation: Dict[str, Any], default: str) -> str:
-        """Safely get title"""
+        """Safely get title."""
         return conversation.get("title", default)
 
     def get_message_count(self, conversation: Dict[str, Any]) -> int:
-        """Safely get message count"""
+        """Safely get message count."""
         return len(conversation.get("messages", []))

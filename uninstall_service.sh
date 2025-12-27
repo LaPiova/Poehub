@@ -16,24 +16,26 @@ echo -e "${YELLOW}  Uninstalling PoeBot System Service${NC}"
 echo -e "${BLUE}=========================================${NC}"
 echo ""
 
+SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
+
 # Stop service if running
-if systemctl is-active --quiet poebot; then
+if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo -e "${BLUE}Stopping service...${NC}"
-    sudo systemctl stop poebot
+    sudo systemctl stop "$SERVICE_NAME"
     echo -e "${GREEN}✓${NC} Service stopped"
 fi
 
 # Disable service
-if systemctl is-enabled --quiet poebot 2>/dev/null; then
+if systemctl is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
     echo -e "${BLUE}Disabling service...${NC}"
-    sudo systemctl disable poebot
+    sudo systemctl disable "$SERVICE_NAME"
     echo -e "${GREEN}✓${NC} Service disabled"
 fi
 
 # Remove service file
-if [ -f "/etc/systemd/system/poebot.service" ]; then
+if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
     echo -e "${BLUE}Removing service file...${NC}"
-    sudo rm /etc/systemd/system/poebot.service
+    sudo rm "/etc/systemd/system/${SERVICE_NAME}.service"
     echo -e "${GREEN}✓${NC} Service file removed"
 fi
 

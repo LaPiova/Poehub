@@ -83,7 +83,7 @@ Once the bot is running, configure it in Discord:
 
 1. **Add the custom cog path** (use absolute path):
 ```
-[p]addpath /home/ubuntu/red-cogs
+[p]addpath /home/<your-user>/red-cogs
 ```
 *Note: Relative paths like ~/red-cogs are not supported*
 
@@ -298,12 +298,14 @@ The bot uses the OpenAI-compatible endpoint at `https://api.poe.com/v1`
 
 ```
 Poehub/
-├── poehub.py               # Main cog logic
-├── api_client.py           # API interaction layer
-├── conversation_manager.py # State and history management
-├── encryption.py           # Encryption helper class
-├── __init__.py             # Package initialization
-├── info.json               # Cog metadata
+├── src/poehub/             # Cog package (synced to $HOME/red-cogs/poehub/)
+│   ├── poehub.py           # Main cog logic
+│   ├── api_client.py       # API interaction layer
+│   ├── conversation_manager.py  # State and history management
+│   ├── encryption.py       # Encryption helper class
+│   ├── ui/                 # Discord UI views (dropdowns/buttons)
+│   ├── __init__.py         # Package initialization
+│   └── info.json           # Cog metadata
 ├── requirements.txt        # Python dependencies
 ├── deploy_poe_bot.sh       # Automated deployment script
 ├── start_bot.sh            # Bot startup script
@@ -319,27 +321,27 @@ Poehub/
 
 ### Background Mode (Screen)
 ```bash
-screen -dmS poebot bash -c "source ~/.redenv/bin/activate && redbot PoeBot"
-screen -r poebot  # To attach to the session
+screen -dmS ${POEHUB_SCREEN_NAME:-poebot} bash -c "source ~/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
+screen -r ${POEHUB_SCREEN_NAME:-poebot}  # To attach to the session
 ```
 
 ### As a Systemd Service
 
 1. Copy the service file:
 ```bash
-sudo cp ~/poebot.service /etc/systemd/system/
+sudo cp ~/${POEHUB_SERVICE_NAME:-poebot}.service /etc/systemd/system/
 ```
 
 2. Enable and start:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable poebot.service
-sudo systemctl start poebot.service
+sudo systemctl enable ${POEHUB_SERVICE_NAME:-poebot}.service
+sudo systemctl start ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 
 3. Check status:
 ```bash
-sudo systemctl status poebot.service
+sudo systemctl status ${POEHUB_SERVICE_NAME:-poebot}.service
 ```
 
 ## Troubleshooting

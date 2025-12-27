@@ -64,7 +64,7 @@ def main():
         print()
         print("Next steps:")
         print("1. Start your bot: ./start_bot.sh")
-        print("2. In Discord: [p]addpath ~/red-cogs")
+        print("2. In Discord (absolute path required): [p]addpath $HOME/red-cogs")
         print("3. In Discord: [p]load poehub")
         print("4. In Discord: [p]poeapikey <your_key>")
         return 0

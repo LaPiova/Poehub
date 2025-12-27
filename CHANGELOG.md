@@ -114,10 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### File Structure
 ```
 Poehub/
-├── poehub.py (478 lines)          # Main cog implementation
-├── encryption.py (120 lines)       # Encryption helper
-├── __init__.py                     # Package initialization
-├── info.json                       # Cog metadata
+├── src/poehub/                     # Cog package source
+│   ├── poehub.py                   # Main cog implementation
+│   ├── api_client.py               # Poe/OpenAI client wrapper
+│   ├── conversation_manager.py     # Conversation state + encryption
+│   ├── encryption.py               # Encryption helper
+│   ├── ui/                         # Discord UI views
+│   ├── __init__.py                 # Package initialization
+│   └── info.json                   # Cog metadata
 ├── requirements.txt                # Python dependencies
 ├── deploy_poe_bot.sh              # Deployment automation
 ├── start_bot.sh                   # Bot startup script
@@ -283,7 +287,7 @@ Poehub/
 ```bash
 cd ~/Poehub
 git pull  # If using git
-cp poehub.py encryption.py __init__.py info.json ~/red-cogs/poehub/
+./sync_to_red.sh
 ```
 
 ### In Discord
