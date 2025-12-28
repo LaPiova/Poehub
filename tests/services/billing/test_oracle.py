@@ -1,4 +1,4 @@
-from poehub.pricing_oracle import PricingOracle, TokenUsage
+from poehub.services.billing.oracle import PricingOracle, TokenUsage
 
 
 class TestPricingOracle:

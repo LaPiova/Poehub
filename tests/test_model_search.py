@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import discord
 import pytest
 
-from poehub.i18n import LANG_EN
+from poehub.core.i18n import LANG_EN
+from poehub.services.chat import ChatService
 from poehub.ui.config_view import ModelSearchModal, ModelSelect
 
 
@@ -41,7 +42,9 @@ async def test_get_matching_models():
         # PoeHub.__init__ calls self._initialize() which might fail if dependencies are mocked/missing
         # But let's assume global mocks in conftest handle imports.
 
-        cog.client = MagicMock()
+        # Init real ChatService with mocks
+        cog.chat_service = ChatService(Mock(), Mock(), Mock(), Mock(), Mock())
+        cog.chat_service.client = MagicMock()
 
         async def mock_get_models(force_refresh=False):
             return [
@@ -51,7 +54,7 @@ async def test_get_matching_models():
                 {"id": "Gemini-Pro"},
             ]
 
-        cog.client.get_models = Mock(side_effect=mock_get_models)
+        cog.chat_service.client.get_models = Mock(side_effect=mock_get_models)
 
         # Test query
         results = await cog._get_matching_models("claude")

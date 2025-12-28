@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import LANG_LABELS, SUPPORTED_LANGS, tr
-from ..prompt_utils import (
+from ..core.i18n import LANG_LABELS, SUPPORTED_LANGS, tr
+from ..utils.prompts import (
     PROMPT_PREFILL_LIMIT,
     PROMPT_TEXTINPUT_MAX,
     send_prompt_files_dm,

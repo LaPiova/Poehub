@@ -2,15 +2,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from poehub.conversation_manager import ConversationManager
-from poehub.encryption import EncryptionHelper
+from poehub.core.encryption import EncryptionHelper
+from poehub.services.conversation.storage import ConversationStorageService
 
 
-class TestConversationManager:
+class TestConversationStorageService:
     @pytest.fixture
     def manager(self):
         encryption = EncryptionHelper()
-        return ConversationManager(encryption)
+        return ConversationStorageService(encryption)
 
     def test_create_conversation(self, manager):
         conv = manager.create_conversation("test_id", "Test Title")

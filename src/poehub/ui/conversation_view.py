@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
 from .common import BackButton, CloseMenuButton, preview_content
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -41,7 +41,7 @@ class SwitchConversationSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         conv_id = self.values[0]
-        await self.cog._set_active_conversation(self.ctx.author.id, conv_id)
+        await self.cog.context_service.set_active_conversation_id(self.ctx.author.id, conv_id)
         await interaction.response.defer()
         if isinstance(self.view, ConversationMenuView):
             await self.view.refresh_content(interaction)
@@ -68,7 +68,7 @@ class DeleteButton(discord.ui.Button):
             )
             return
 
-        active_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
+        active_id = await self.cog.context_service.get_active_conversation_id(self.ctx.author.id)
         if active_id == "default":
             await interaction.response.send_message(
                 tr(self.lang, "CONV_DELETE_FAILED", title="Default"),
@@ -90,7 +90,7 @@ class DeleteButton(discord.ui.Button):
             return
 
         # Reset to default
-        await self.cog._set_active_conversation(self.ctx.author.id, "default")
+        await self.cog.context_service.set_active_conversation_id(self.ctx.author.id, "default")
 
         await interaction.response.send_message(
             tr(self.lang, "CONV_DELETED_OK", title=title),
@@ -122,7 +122,7 @@ class ClearHistoryButton(discord.ui.Button):
             )
             return
 
-        active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
+        active_conv_id = await self.cog.context_service.get_active_conversation_id(self.ctx.author.id)
         conv = await self.cog._get_conversation(self.ctx.author.id, active_conv_id)
         if not conv:
             await interaction.response.send_message(
@@ -255,7 +255,7 @@ class ConversationMenuView(discord.ui.View):
             ], "default"
 
         conversations = await self.cog.config.user(self.ctx.author).conversations()
-        active_conv_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
+        active_conv_id = await self.cog.context_service.get_active_conversation_id(self.ctx.author.id)
 
         options: list[discord.SelectOption] = []
         if conversations:

@@ -115,3 +115,11 @@ class BudgetStatus(BaseModel):
         if self.points_limit is None:
             return None
         return max(0, self.points_limit - self.points_spent)
+
+
+class MessageData(BaseModel):
+    """Data structure for a chat message to be summarized."""
+
+    author: str
+    content: str
+    timestamp: str

@@ -20,18 +20,21 @@ from redbot.core import Config
 from redbot.core import commands as red_commands
 from redbot.core.bot import Red
 
-from .api_client import BaseLLMClient, get_client
-from .conversation_manager import ConversationManager
-from .encryption import EncryptionHelper, generate_key
-from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
-from .pricing_crawler import PricingCrawler
-from .pricing_oracle import PricingOracle, TokenUsage
-from .prompt_utils import prompt_to_file
+from .core.encryption import EncryptionHelper, generate_key
+from .core.i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, tr
+from .services.billing import BillingService
+from .services.billing.crawler import PricingCrawler
+from .services.billing.oracle import PricingOracle
+from .services.chat import ChatService
+from .services.context import ContextService
+from .services.conversation.storage import ConversationStorageService
+from .services.summarizer import SummarizerService
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
 from .ui.home_view import HomeMenuView
 from .ui.language_view import LanguageView
 from .ui.provider_view import ProviderConfigView
+from .utils.prompts import prompt_to_file
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -112,24 +115,12 @@ class PoeHub(red_commands.Cog):
         self.config.register_user(**default_user)
         self.config.register_guild(**default_guild)
 
-        self.client: BaseLLMClient | None = None
-        self.conversation_manager: ConversationManager | None = None
+        self.conversation_manager: ConversationStorageService | None = None
         self.encryption: EncryptionHelper | None = None
+        self.billing: BillingService | None = None
 
         # Initialize encryption on load
         asyncio.create_task(self._initialize())
-
-    async def _get_language(self, user_id: int) -> str:
-        """Return the user's language code."""
-        lang = await self.config.user_from_id(user_id).language()
-        if lang in SUPPORTED_LANGS:
-            return lang
-        return LANG_EN
-
-    async def _t(self, user_id: int, key: str, **kwargs: object) -> str:
-        """Translate a string key for a specific user."""
-        lang = await self._get_language(user_id)
-        return tr(lang, key, **kwargs)
 
     async def _initialize(self) -> None:
         """Initialize encryption, conversation manager, and API client."""
@@ -144,7 +135,17 @@ class PoeHub(red_commands.Cog):
 
             # Initialize helpers
             self.encryption = EncryptionHelper(encryption_key)
-            self.conversation_manager = ConversationManager(self.encryption)
+            self.conversation_manager = ConversationStorageService(self.encryption)
+            self.billing = BillingService(self.bot, self.config)
+            self.context_service = ContextService(self.config)
+            self.chat_service = ChatService(
+                self.bot,
+                self.config,
+                self.billing,
+                self.context_service,
+                self.conversation_manager,
+            )
+            self.summarizer = SummarizerService(self.chat_service, self.context_service)
 
             # Load dynamic rates
             stored_rates = await self.config.dynamic_rates()
@@ -159,272 +160,20 @@ class PoeHub(red_commands.Cog):
             log.exception("Error initializing PoeHub")
 
         # Start background tasks
-        self.bot.loop.create_task(self._pricing_update_loop())
-
-    async def _pricing_update_loop(self):
-        """Background task to update pricing monthly (or daily for safety)."""
-        await self.bot.wait_until_ready()
-        while True:
-            try:
-                # Update prices
-                log.info("Running automatic pricing update...")
-                new_rates = await PricingCrawler.fetch_rates()
-                if new_rates:
-                    PricingOracle.load_dynamic_rates(new_rates)
-
-                    # Persist
-                    current_rates = await self.config.dynamic_rates()
-                    current_rates.update(new_rates)
-                    await self.config.dynamic_rates.set(current_rates)
-                    log.info(
-                        f"Automatic pricing update complete. {len(new_rates)} rates loaded."
-                    )
-            except Exception:
-                log.exception("Error in pricing update loop")
-
-            # Sleep for 24 hours
-            await asyncio.sleep(86400)
-
-    async def _resolve_billing_guild(
-        self, user: discord.User, channel: discord.abc.Messageable
-    ) -> discord.Guild | None:
-        """Determine which guild should be billed for the request."""
-        # 1. Guild Channel
-        if hasattr(channel, "guild") and channel.guild:
-            if await self.config.guild(channel.guild).access_allowed():
-                return channel.guild
-            return None
-
-        # 2. DM Channel
-        candidates = []
-        for guild in user.mutual_guilds:
-            # Check if bot is member (implicit in mutual_guilds)
-            if await self.config.guild(guild).access_allowed():
-                candidates.append(guild)
-
-        if not candidates:
-            return None
-
-        # Determine stability - Sort by ID to ensure deterministic choice if limits are equal
-        candidates.sort(key=lambda g: g.id)
-
-        if len(candidates) == 1:
-            return candidates[0]
-
-        # Multiple candidates: Pick the one with higher limit (None = Infinite is highest)
-        best_guild = None
-        best_limit = -1.0
-
-        for guild in candidates:
-            limit = await self.config.guild(guild).monthly_limit()
-            if limit is None:
-                return guild  # Infinite wins immediately
-            if limit > best_limit:
-                best_limit = limit
-                best_guild = guild
-
-        return best_guild
-
-    async def _reset_budget_if_new_month(self, guild: discord.Guild) -> None:
-        """Reset guild spend if we are in a new month."""
-        import datetime
-
-        current_month = datetime.datetime.now().strftime("%Y-%m")
-        last_reset = await self.config.guild(guild).last_reset_month()
-
-        log.info(
-            f"Debug Reset Check - Guild: {guild.id}, Stored: {last_reset}, Current: {current_month}"
-        )
-
-        if last_reset != current_month:
-            # It's a new month! Reset spend (Both USD and Points).
-            log.info(f"TRIGGERING RESET for Guild {guild.id}")
-            await self.config.guild(guild).current_spend.set(0.0)
-            await self.config.guild(guild).current_spend_points.set(0.0)
-            await self.config.guild(guild).last_reset_month.set(current_month)
-            log.info(
-                f"Reset monthly budget for guild {guild.name} ({guild.id}) - Month: {current_month}"
-            )
-
-    async def _check_budget(self, guild: discord.Guild) -> bool:
-        """Check if guild has budget remaining."""
-        await self._reset_budget_if_new_month(guild)
-
-        # Determine strictness based on active provider
-        active_provider = await self.config.active_provider()
-
-        if active_provider == "poe":
-            limit = await self.config.guild(guild).monthly_limit_points()
-            spend = await self.config.guild(guild).current_spend_points()
-            if limit is None:
-                return True
-            return spend < limit
-        else:
-            limit = await self.config.guild(guild).monthly_limit()
-            spend = await self.config.guild(guild).current_spend()
-            if limit is None:
-                return True
-            return spend < limit
-
-    async def _update_spend(
-        self, guild: discord.Guild, cost: float, currency: str = "USD"
-    ):
-        """Update spend for guild."""
-        if cost <= 0:
-            return
-
-        if currency == "Points":
-            current = await self.config.guild(guild).current_spend_points()
-            if current is None:
-                current = 0.0
-            new_spend = current + cost
-            await self.config.guild(guild).current_spend_points.set(new_spend)
-            log.info(
-                f"Guild {guild.id} POINTS updated: {current} + {cost} -> {new_spend}"
-            )
-        else:
-            # Default to USD logic (legacy current_spend)
-            current = await self.config.guild(guild).current_spend()
-            if current is None:
-                current = 0.0
-            new_spend = current + cost
-            await self.config.guild(guild).current_spend.set(new_spend)
-            log.info(f"Guild {guild.id} USD updated: {current} + {cost} -> {new_spend}")
+        await self.billing.start_pricing_loop()
+        # Initialize client via service
+        await self.chat_service.initialize_client()
 
     async def _init_client(self) -> None:
         """Initialize the LLM client based on configuration."""
-        self.client = None
-
-        # Check dummy mode
-        use_dummy = await self.config.use_dummy_api()
-        if use_dummy and not self.allow_dummy_mode:
-            await self.config.use_dummy_api.set(False)
-            use_dummy = False
-
-        if use_dummy:
-            self.client = get_client("dummy", "dummy")
-            log.info("Initialized Dummy Provider (Offline)")
-            return
-
-        # Get configuration
-        active_provider = await self.config.active_provider()
-        provider_keys = await self.config.provider_keys()
-        provider_urls = await self.config.provider_urls()
-
-        # Resolve API Key
-        api_key = provider_keys.get(active_provider)
-        # Fallback to legacy key if not found and provider is Poe (migration path)
-        if not api_key:
-            legacy_key = await self.config.api_key()
-            if legacy_key and active_provider == "poe":
-                api_key = legacy_key
-                # Auto-migrate
-                provider_keys["poe"] = legacy_key
-                await self.config.provider_keys.set(provider_keys)
-
-        # Resolve Base URL
-        base_url = provider_urls.get(active_provider)
-        # Fallback to legacy URL
-        if not base_url:
-            legacy_url = await self.config.base_url()
-            if legacy_url and active_provider == "poe":
-                base_url = legacy_url
-
-        if api_key:
-            try:
-                self.client = get_client(active_provider, api_key, base_url)
-                log.info(f"Initialized client for provider: {active_provider}")
-            except Exception as e:
-                log.error(f"Failed to initialize client for {active_provider}: {e}")
-        else:
-            log.warning(f"No API key found for active provider: {active_provider}")
-
-    def _split_message(self, content: str, max_length: int = 1950) -> list[str]:
-        """Split text into Discord-safe chunks.
-
-        Args:
-            content: Full content to split.
-            max_length: Maximum chunk length. (Discord hard limit is 2000.)
-
-        Returns:
-            A list of chunks in send order.
-        """
-        if len(content) <= max_length:
-            return [content]
-
-        chunks = []
-        remaining = content
-
-        while remaining:
-            if len(remaining) <= max_length:
-                chunks.append(remaining)
-                break
-
-            # Try to find a good split point
-            chunk = remaining[:max_length]
-            split_point = max_length
-
-            # Priorities for splitting
-            split_candidates = [
-                ("```\n", 4),  # Code block end
-                ("\n\n", 2),  # Paragraph
-                ("\n", 1),  # Line
-                (". ", 2),  # Sentence
-                (" ", 1),  # Word
-            ]
-
-            for delimiter, offset in split_candidates:
-                last_pos = chunk.rfind(delimiter)
-                if last_pos > max_length * 0.5:  # Only if it's in the latter half
-                    split_point = last_pos + offset
-                    break
-
-            # Add the chunk
-            chunks.append(remaining[:split_point].rstrip())
-            remaining = remaining[split_point:].lstrip()
-
-            # Add continuation indicator if there's more content
-            if remaining and not chunks[-1].endswith("```"):
-                chunks[-1] = chunks[-1] + "\n\n*(continued...)*"
-            if remaining and len(chunks) > 0:
-                remaining = "*(continued)*\n\n" + remaining
-
-        return chunks
-
-    async def _get_system_prompt(self, user_id: int) -> str | None:
-        """Return the effective system prompt for a user."""
-        user = discord.Object(id=user_id)
-
-        # Check for user's personal prompt first
-        user_prompt = await self.config.user(user).system_prompt()
-        if user_prompt:
-            return user_prompt
-
-        # Fall back to default prompt
-        return await self.config.default_system_prompt()
+        if self.chat_service:
+            await self.chat_service.initialize_client()
 
     async def _get_matching_models(self, query: str | None = None) -> list[str]:
         """Fetch and filter models matching the query."""
-        if not self.client:
-            return []
-
-        try:
-            models = await self.client.get_models()
-            model_ids = [
-                m.get("id") for m in models if isinstance(m, dict) and m.get("id")
-            ]
-
-            # Filter distinct
-            unique_ids = list(dict.fromkeys(model_ids))
-
-            if query:
-                query_lower = query.lower()
-                unique_ids = [mid for mid in unique_ids if query_lower in mid.lower()]
-
-            return unique_ids
-        except Exception as exc:
-            log.warning("Could not fetch models: %s", exc)
-            return []
+        if self.chat_service:
+            return await self.chat_service.get_matching_models(query)
+        return []
 
     async def _build_model_select_options(
         self, query: str | None = None
@@ -503,263 +252,9 @@ class PoeHub(red_commands.Cog):
     async def _process_chat_request(
         self, message: discord.Message, content: str, ctx: red_commands.Context = None
     ):
-        """
-        Unified handler for processing chat requests from commands or mentions.
-        Handles:
-        - API client check
-        - User settings (model, system prompt)
-        - Quote/Reply context
-        - Image attachments
-        - Conversation history management (add user msg -> stream reply -> add bot msg)
-        """
-        if not self.client:
-            if ctx:
-                await ctx.send(
-                    "❌ API client not initialized. Bot owner must use `[p]poeapikey` first."
-                )
-            else:
-                await message.channel.send(
-                    "❌ API client not initialized. Please contact the bot owner."
-                )
-            return
-
-        # Determine target channel and user
-        target_channel = message.channel
-        user = message.author
-
-        # Get user's preferences
-        user_model = await self.config.user(user).model()
-        active_conv_id = await self._get_active_conversation_id(user.id)
-
-        # Load conversation history
-        history = await self._get_conversation_messages(user.id, active_conv_id)
-
-        # --- Check Access & Budget ---
-        billing_guild = await self._resolve_billing_guild(user, target_channel)
-        if not billing_guild:
-            if ctx:
-                await ctx.send(
-                    "❌ Access denied. No authorized guild found for this context."
-                )
-            elif isinstance(target_channel, discord.DMChannel):
-                await target_channel.send(
-                    "❌ Access denied. You do not share a server with the bot that permits DM usage."
-                )
-            return
-
-        if not await self._check_budget(billing_guild):
-            msg = "❌ Monthly budget limit reached for this guild."
-            if ctx:
-                await ctx.send(msg)
-            else:
-                await target_channel.send(msg)
-            return
-
-        # --- Handle Quote / Reply Context ---
-        quote_context = ""
-        ref_msg = None
-        if message.reference and message.reference.message_id:
-            try:
-                # Attempt to fetch the referenced message
-                # If it's a reply to a message in the same channel, we can often get it from cache or fetch it
-                ref_msg = message.reference.cached_message
-                if not ref_msg:
-                    ref_msg = await message.channel.fetch_message(
-                        message.reference.message_id
-                    )
-
-                if ref_msg and ref_msg.content:
-                    # Format the quote
-                    # We'll create a structured representation or just prepend it to the user content.
-                    # Prepending clear context is usually robust for LLMs.
-                    quote_context = f'[Replying to {ref_msg.author.display_name}: "{ref_msg.content}"]\n\n'
-
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                # If we fail to fetch (deleted, no permission), just ignore
-                pass
-
-        # --- Handle Attachments ---
-        image_urls = []
-        if message.attachments:
-            for attachment in message.attachments:
-                if attachment.content_type and attachment.content_type.startswith(
-                    "image/"
-                ):
-                    image_urls.append(attachment.url)
-
-        # Also check referenced message for images
-        if ref_msg and ref_msg.attachments:
-            for attachment in ref_msg.attachments:
-                if attachment.content_type and attachment.content_type.startswith(
-                    "image/"
-                ):
-                    image_urls.append(attachment.url)
-
-        # --- Construct User Message ---
-        # Combine quote context with user's actual content
-        full_text_input = f"{quote_context}{content}" if quote_context else content
-
-        if image_urls:
-            # If we have images, format specifically for the API
-            # Note: format_image_message usually puts the text at the start or end of the array
-            # We pass the combined text
-            formatted_content = self.client.format_image_message(
-                full_text_input, image_urls
-            )
-            new_message = {"role": "user", "content": formatted_content}
-        else:
-            new_message = {"role": "user", "content": full_text_input}
-
-        # Save to conversation history
-        # We save exactly what we are sending so history stays consistent
-        # For text+image, 'formatted_content' is a list of dicts or special format handled by client
-        # For text only, it's a string
-        msg_content_to_save = formatted_content if image_urls else full_text_input
-        await self._add_message_to_conversation(
-            user.id, active_conv_id, "user", msg_content_to_save
-        )
-
-        # Combine history
-        messages = history + [new_message]
-
-        # --- System Prompt ---
-        system_prompt = await self._get_system_prompt(user.id)
-        if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
-
-        # --- Determine Response Target ---
-        # In guild channels, create a thread under the message to avoid spamming
-        # DMs don't support threads, so respond directly there
-        # If already in a thread, respond in the same thread (no nested threads)
-        response_target = target_channel
-
-        is_already_thread = isinstance(target_channel, discord.Thread)
-
-        if (
-            not isinstance(target_channel, discord.DMChannel)
-            and not is_already_thread
-            and hasattr(message, "create_thread")
-        ):
-            try:
-                # Create a thread under the user's message
-                # Use a short descriptive name based on the message content
-                thread_name = content[:50] + "..." if len(content) > 50 else content
-                if not thread_name.strip():
-                    thread_name = "AI Response"
-
-                # Create the thread
-                thread = await message.create_thread(
-                    name=thread_name,
-                    auto_archive_duration=60,  # Auto-archive after 1 hour of inactivity
-                )
-                response_target = thread
-            except (discord.Forbidden, discord.HTTPException) as e:
-                # If thread creation fails (e.g., no permission),
-                # fall back to responding in the channel directly
-                log.warning(f"Could not create thread for AI response: {e}")
-
-        # --- Stream Response ---
-        # We need a context-like object or channel to send to.
-        # _stream_response writes to 'ctx' if provided, or 'target_channel' if provided
-        await self._stream_response(
-            ctx=ctx,
-            messages=messages,
-            model=user_model,
-            target_channel=response_target,
-            save_to_conv=(user.id, active_conv_id),
-            billing_guild=billing_guild,
-        )
-
-    async def _stream_response(
-        self,
-        ctx: red_commands.Context | None,
-        messages: list[dict[str, Any]],
-        model: str,
-        target_channel=None,
-        save_to_conv=None,
-        billing_guild: discord.Guild = None,
-    ):
-        """Stream the AI response and update Discord message."""
-        # target_channel fallback
-        dest = (
-            target_channel
-            if target_channel
-            else (ctx.channel if ctx and hasattr(ctx, "channel") else None)
-        )
-        if not dest:
-            log.error("No destination channel for stream response")
-            return
-
-        try:
-            # Create initial response message
-            response_msg = await dest.send("🤔 Thinking...")
-
-            # accumulated_parts = [] # We will use a list for efficient appending
-            accumulated_parts = []
-            accumulated_content = ""
-            last_update = time.time()
-
-            # Use the new client wrapper for streaming
-            stream = self.client.stream_chat(model, messages)
-
-            async for item in stream:
-                if isinstance(item, TokenUsage):
-                    # Final usage object
-                    log.info(f"Got usage: {item} (Currency: {item.currency})")
-                    if billing_guild:
-                        await self._update_spend(
-                            billing_guild, item.cost, currency=item.currency
-                        )
-                    continue
-
-                content = item
-                accumulated_parts.append(content)
-                # We defer joining until we need to display or save
-
-                # Update message every 2 seconds to avoid rate limits
-                current_time = time.time()
-                if current_time - last_update >= 2.0:
-                    try:
-                        # Join locally for display
-                        # This operation is O(N) but happens rarely (every 2s)
-                        current_full_content = "".join(accumulated_parts)
-
-                        # Discord has a 2000 char limit
-                        display_content = current_full_content[:1900]
-                        if len(current_full_content) > 1900:
-                            display_content += "\n...(truncated)"
-
-                        await response_msg.edit(content=display_content)
-                        last_update = current_time
-                    except discord.HTTPException:
-                        pass  # Ignore rate limit errors during streaming
-
-            # Final update
-            accumulated_content = "".join(accumulated_parts)
-            if accumulated_content:
-                # Split into chunks intelligently (Discord 2000 char limit)
-                chunks = self._split_message(accumulated_content)
-
-                # Update first message
-                await response_msg.edit(content=chunks[0])
-
-                # Send additional chunks if needed
-                for chunk in chunks[1:]:
-                    await dest.send(chunk)
-
-                # Save assistant response to conversation
-                if save_to_conv:
-                    user_id, conv_id = save_to_conv
-                    await self._add_message_to_conversation(
-                        user_id, conv_id, "assistant", accumulated_content
-                    )
-            else:
-                await response_msg.edit(content="❌ No response received from API.")
-
-        except Exception as exc:  # noqa: BLE001 - surface errors to user
-            error_msg = f"❌ Error communicating with Poe API: {exc}"
-            log.exception("Error communicating with Poe API")
-            await dest.send(error_msg)
+        """Unified handler for processing chat requests."""
+        if self.chat_service:
+            await self.chat_service.process_chat_request(message, content, ctx)
 
     # --- Conversation Management Methods (Refactored) ---
 
@@ -803,15 +298,6 @@ class PoeHub(red_commands.Cog):
             return True
         return False
 
-    async def _get_active_conversation_id(self, user_id: int) -> str:
-        """Get the active conversation ID for a user"""
-        conv_id = await self.config.user_from_id(user_id).active_conversation()
-        return conv_id or "default"
-
-    async def _set_active_conversation(self, user_id: int, conv_id: str):
-        """Set the active conversation for a user"""
-        await self.config.user_from_id(user_id).active_conversation.set(conv_id)
-
     async def _get_or_create_conversation(
         self, user_id: int, conv_id: str
     ) -> dict[str, Any]:
@@ -854,6 +340,12 @@ class PoeHub(red_commands.Cog):
 
         conv = await self._get_conversation(user_id, conv_id)
         return self.conversation_manager.get_api_messages(conv)
+
+    async def _get_language(self, user_id: int) -> str:
+        """Get the user's preferred language."""
+        if self.context_service:
+            return await self.context_service.get_user_language(user_id)
+        return LANG_EN
 
     # --- Commands ---
 
@@ -926,8 +418,7 @@ class PoeHub(red_commands.Cog):
 
         msg = f"✅ Active provider set to **{provider}**."
 
-        # Check if key needs to be set
-        if not self.client and provider != "dummy":
+        if not (self.chat_service and self.chat_service.client) and provider != "dummy":
             msg += f"\n⚠️ **Warning**: Client not initialized. You probably need to set an API key for {provider}.\nUse `[p]setapikey {provider} <key>`."
 
         await ctx.send(msg)
@@ -985,8 +476,10 @@ class PoeHub(red_commands.Cog):
 
         # 2. Fetch from OpenRouter (if client supports it)
         openrouter_rates = {}
-        if self.client and hasattr(self.client, "fetch_openrouter_pricing"):
-            openrouter_rates = await self.client.fetch_openrouter_pricing()
+        if self.chat_service.client and hasattr(
+            self.chat_service.client, "fetch_openrouter_pricing"
+        ):
+            openrouter_rates = await self.chat_service.client.fetch_openrouter_pricing()
 
         # Merge: OpenRouter takes precedence for its own models if overlap?
         # Actually, let's just merge crawler first, then openrouter
@@ -1243,7 +736,9 @@ class PoeHub(red_commands.Cog):
             await ctx.send("❌ System not initialized.")
             return
 
-        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
+        active_conv_id = await self.context_service.get_active_conversation_id(
+            ctx.author.id
+        )
         conv = await self._get_conversation(ctx.author.id, active_conv_id)
 
         if conv is None:
@@ -1300,7 +795,7 @@ class PoeHub(red_commands.Cog):
         conv_data = self.conversation_manager.create_conversation(conv_id, title)
 
         await self._save_conversation(user_id, conv_id, conv_data)
-        await self._set_active_conversation(user_id, conv_id)
+        await self.context_service.set_active_conversation_id(user_id, conv_id)
 
         return conv_id, conv_data
 
@@ -1328,7 +823,7 @@ class PoeHub(red_commands.Cog):
             await ctx.send(f"❌ Conversation `{conv_id}` not found.")
             return
 
-        await self._set_active_conversation(ctx.author.id, conv_id)
+        await self.context_service.set_active_conversation_id(ctx.author.id, conv_id)
 
         title = conv.get("title", conv_id)
         msg_count = len(conv.get("messages", []))
@@ -1344,7 +839,9 @@ class PoeHub(red_commands.Cog):
             return
 
         conversations = await self.config.user(ctx.author).conversations()
-        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
+        active_conv_id = await self.context_service.get_active_conversation_id(
+            ctx.author.id
+        )
 
         if not conversations:
             await ctx.send("📭 You don't have any conversations yet.")
@@ -1391,7 +888,9 @@ class PoeHub(red_commands.Cog):
             await ctx.send(f"❌ Conversation `{conv_id}` not found.")
             return
 
-        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
+        active_conv_id = await self.context_service.get_active_conversation_id(
+            ctx.author.id
+        )
         if conv_id == active_conv_id:
             await ctx.send("❌ Cannot delete the active conversation.")
             return
@@ -1403,7 +902,9 @@ class PoeHub(red_commands.Cog):
     @red_commands.command(name="currentconv", aliases=["curr", "cconv"])
     async def current_conversation(self, ctx: red_commands.Context):
         """Show details about your current conversation"""
-        active_conv_id = await self._get_active_conversation_id(ctx.author.id)
+        active_conv_id = await self.context_service.get_active_conversation_id(
+            ctx.author.id
+        )
         conv = await self._get_conversation(ctx.author.id, active_conv_id)
 
         if conv is None:
@@ -1451,7 +952,7 @@ class PoeHub(red_commands.Cog):
     @red_commands.command(name="listmodels", aliases=["lm", "models"])
     async def list_models(self, ctx: red_commands.Context, refresh: bool = False):
         """Show available AI models"""
-        if not self.client:
+        if not self.chat_service.client:
             await ctx.send("❌ API client not initialized.")
             return
 
@@ -1459,7 +960,7 @@ class PoeHub(red_commands.Cog):
 
         try:
             # Use client to fetch models
-            models = await self.client.get_models(force_refresh=refresh)
+            models = await self.chat_service.client.get_models(force_refresh=refresh)
 
             if not models:
                 await status_msg.edit(content="❌ Could not fetch models.")
@@ -1523,7 +1024,9 @@ class PoeHub(red_commands.Cog):
                     name = f"{cat} (Part {part})" if part > 1 else cat
                     embed.add_field(name=name, value=val, inline=False)
 
-            embed.set_footer(text=f"Cached {self.client.get_cache_age()}s ago")
+            embed.set_footer(
+                text=f"Cached {self.chat_service.client.get_cache_age()}s ago"
+            )
             await status_msg.edit(content=None, embed=embed)
 
         except Exception as e:
@@ -1532,7 +1035,7 @@ class PoeHub(red_commands.Cog):
     @red_commands.command(name="searchmodels", aliases=["findm"])
     async def search_models(self, ctx: red_commands.Context, *, query: str):
         """Search for specific models"""
-        if not self.client:
+        if not self.chat_service.client:
             await ctx.send("❌ API client not initialized.")
             return
 

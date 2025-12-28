@@ -1,7 +1,7 @@
 """Pricing Oracle for PoeHub."""
 
 # Import TokenUsage from models for Pydantic validation
-from .models import TokenUsage
+from ...models import TokenUsage
 
 # Re-export for backward compatibility
 __all__ = ["TokenUsage", "PricingOracle"]

@@ -2,7 +2,7 @@ import base64
 
 from cryptography.fernet import Fernet
 
-from poehub.encryption import EncryptionHelper, generate_key
+from poehub.core.encryption import EncryptionHelper, generate_key
 
 
 class TestEncryptionHelper:

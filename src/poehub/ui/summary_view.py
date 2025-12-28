@@ -2,33 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from typing import (
-    TYPE_CHECKING,
-)
 
 import discord
 from pydantic import BaseModel
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
+from ..core.protocols import IPoeHub
+from ..models import MessageData
 from .common import BackButton, CloseMenuButton
-
-if TYPE_CHECKING:  # pragma: no cover
-    from ..poehub import PoeHub
 
 log = logging.getLogger("red.poehub.summary")
 
 # --- Pydantic Models for Validation ---
 
 
-class MessageData(BaseModel):
-    author: str
-    content: str
-    timestamp: str
+
 
 
 class SummaryChunk(BaseModel):
@@ -81,7 +73,7 @@ class TimeRangeSelect(discord.ui.Select):
 class CustomTimeModal(discord.ui.Modal):
     def __init__(
         self,
-        cog: PoeHub,
+        cog: IPoeHub,
         ctx: red_commands.Context,
         lang: str,
         parent_view: SummaryView,
@@ -111,7 +103,7 @@ class CustomTimeModal(discord.ui.Modal):
 
 
 class StartSummaryButton(discord.ui.Button):
-    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "SUMMARY_BTN_START"),
             style=discord.ButtonStyle.success,
@@ -169,71 +161,46 @@ class StartSummaryButton(discord.ui.Button):
     async def _run_summary_pipeline(self, channel: discord.TextChannel, hours: float):
         initial_msg = await channel.send(f"🔄 Scanning messages from last {hours}h...")
 
+        # 1. Fetch Messages
         now = datetime.now(UTC)
         after_time = now - timedelta(hours=hours)
 
-        all_text_chunks: list[str] = []
-        current_chunk = []
-        current_len = 0
-        MAX_CHUNK_LEN = 12000  # Approx 3-4k tokens
-
-        message_count = 0
-
-        # 1. Consume Messages
+        messages: list[MessageData] = []
         async for batch in self._fetch_messages_producer(channel, after_time):
-            message_count += len(batch)
-            for m in batch:
-                line = f"[{m.timestamp}] {m.author}: {m.content}"
-                if current_len + len(line) > MAX_CHUNK_LEN:
-                    all_text_chunks.append("\n".join(current_chunk))
-                    current_chunk = []
-                    current_len = 0
-                current_chunk.append(line)
-                current_len += len(line)
+            messages.extend(batch)
 
-        if current_chunk:
-            all_text_chunks.append("\n".join(current_chunk))
-
-        if message_count == 0:
+        if not messages:
             return await initial_msg.edit(content="❌ No messages found in time range.")
 
-        await initial_msg.edit(
-            content=f"📝 Found {message_count} messages. Generating summary (Chunks: {len(all_text_chunks)})..."
-        )
+        message_count = len(messages)
+        await initial_msg.edit(content=f"📝 Found {message_count} messages. Starting summary...")
 
-        # 2. Map Phase: Summarize chunks in parallel
-        # Note: If too many chunks, we might hit rate limits. Semaphore recommended.
-        sem = asyncio.Semaphore(3)
+        # 2. Run Service
+        user_model = await self.cog.config.user(self.ctx.author).model()
+        final_text = ""
 
-        async def summarize_chunk(text: str, index: int) -> str:
-            async with sem:
-                # Use internal helper to get specific model result without streaming to channel
-                # We need a non-streaming helper in PoeHub or we hijack streaming...
-                # For now, we will assume we can use a temporary simplified call
-                # Or we just use the first chunk if map-reduce is too complex for current API client structure
-                # waiting for a full refactor.
-                return text  # Placeholder to show logic flow without new API method
+        # We need to verify if summarizer exists (it should via IPoeHub but implementation might be partial in tests)
+        if not self.cog.summarizer:
+             return await initial_msg.edit(content="❌ Summarizer service not available.")
 
-        # Real implementation needs: self.cog.get_response(prompt) -> str
-        # Since that doesn't exist yet in the simplified client, we'll do a single pass if small,
-        # or just TRUNCATE for safety like the original code if we can't do full map-reduce easily.
+        async for update in self.cog.summarizer.summarize_messages(
+            messages, self.ctx.author.id, model=user_model, billing_guild=self.ctx.guild
+        ):
+            if update.startswith("RESULT: "):
+                final_text = update[8:] # Remove prefix
+            elif update.startswith("STATUS: "):
+                # Update status message occasionally?
+                # To avoid rate limits, we could debounce, but let's just try editing.
+                # If too fast, it might error.
+                try:
+                    await initial_msg.edit(content=f"📝 {update[8:]}")
+                except discord.HTTPException:
+                    pass
 
-        # REVISED STRATEGY:
-        # Since I cannot easily add a non-streaming 'get_response' to PoeHub blindly without breaking things,
-        # I will collapse to a large context window approach (15k chars) which is safer for now,
-        # effectively doing "Chunk 1" only.
+        if not final_text:
+            return await initial_msg.edit(content="❌ Failed to generate summary.")
 
-        full_text = all_text_chunks[0] if all_text_chunks else ""
-        if len(all_text_chunks) > 1:
-            full_text += f"\n... (and {len(all_text_chunks) - 1} more chunks truncated)"
-
-        final_prompt = (
-            f"Please provide a comprehensive summary of the conversation below. "
-            f"Identify the dominant language and write the summary in that language.\n\n"
-            f"{full_text}"
-        )
-
-        # 3. Stream Response (Standard Flow)
+        # 3. Send Result
         try:
             thread = await initial_msg.create_thread(
                 name=f"Summary: Last {hours}h", auto_archive_duration=60
@@ -242,15 +209,7 @@ class StartSummaryButton(discord.ui.Button):
         except discord.Forbidden:
             target = channel
 
-        user_model = await self.cog.config.user(self.ctx.author).model()
-
-        await self.cog._stream_response(
-            ctx=None,
-            messages=[{"role": "user", "content": final_prompt}],
-            model=user_model,
-            target_channel=target,
-            billing_guild=self.ctx.guild,
-        )
+        await self.cog.chat_service.send_split_message(target, final_text)
 
         await initial_msg.edit(
             content=f"✅ Summary generated for {message_count} messages."
@@ -259,7 +218,7 @@ class StartSummaryButton(discord.ui.Button):
 
 class SummaryView(discord.ui.View):
     def __init__(
-        self, cog: PoeHub, ctx: red_commands.Context, lang: str, back_callback=None
+        self, cog: IPoeHub, ctx: red_commands.Context, lang: str, back_callback=None
     ):
         super().__init__(timeout=180)
         self.cog = cog

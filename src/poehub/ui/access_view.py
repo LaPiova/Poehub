@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
 from .common import CloseMenuButton
 
 if TYPE_CHECKING:

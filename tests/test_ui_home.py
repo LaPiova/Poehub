@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from poehub.i18n import LANG_EN
+from poehub.core.i18n import LANG_EN
 from poehub.ui.home_view import HomeMenuView
 
 

@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from poehub.i18n import LANG_EN, LANG_ZH_CN, LANG_ZH_TW, STRINGS, tr
+from poehub.core.i18n import LANG_EN, LANG_ZH_CN, LANG_ZH_TW, STRINGS, tr
 
 
 class TestI18n:

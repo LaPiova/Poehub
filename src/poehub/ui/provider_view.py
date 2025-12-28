@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
 from .access_view import AccessControlView
 from .common import CloseMenuButton
 
@@ -219,7 +219,7 @@ class CheckPricingButton(discord.ui.Button):
         model = await user_conf.model()
 
         # Get Price
-        from ..pricing_oracle import PricingOracle
+        from ..services.billing.oracle import PricingOracle
 
         in_price, out_price, currency = PricingOracle.get_price(provider, model)
 

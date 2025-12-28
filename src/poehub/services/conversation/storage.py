@@ -6,12 +6,12 @@ import logging
 import time
 from typing import Any
 
-from .encryption import EncryptionHelper
+from ...core.encryption import EncryptionHelper
 
-log = logging.getLogger("red.poehub.conversation")
+log = logging.getLogger("red.poehub.services.conversation.storage")
 
 
-class ConversationManager:
+class ConversationStorageService:
     """Manages conversation state and encryption/decryption."""
 
     def __init__(self, encryption: EncryptionHelper) -> None:

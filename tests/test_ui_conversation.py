@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from poehub.i18n import LANG_EN
+from poehub.core.i18n import LANG_EN
 from poehub.ui.conversation_view import ConversationMenuView, DeleteButton
 
 
@@ -16,8 +16,11 @@ async def test_delete_button_callback_success():
     # Mock manager exists
     mock_cog.conversation_manager = Mock()
 
-    # Mock active conversation
-    mock_cog._get_active_conversation_id.return_value = "conv_123"
+    # Mock context service
+    mock_cog.context_service = Mock()
+    mock_cog.context_service.get_active_conversation_id = AsyncMock(return_value="conv_123")
+    mock_cog.context_service.set_active_conversation_id = AsyncMock()
+
     mock_cog._get_conversation.return_value = {"title": "Test Chat"}
     mock_cog._delete_conversation.return_value = True
 
@@ -32,9 +35,9 @@ async def test_delete_button_callback_success():
     await button.callback(mock_interaction)
 
     # Verify logic
-    mock_cog._get_active_conversation_id.assert_called_with(12345)
+    mock_cog.context_service.get_active_conversation_id.assert_called_with(12345)
     mock_cog._delete_conversation.assert_called_with(12345, "conv_123")
-    mock_cog._set_active_conversation.assert_called_with(12345, "default")
+    mock_cog.context_service.set_active_conversation_id.assert_called_with(12345, "default")
 
     # Verify response
     mock_interaction.response.send_message.assert_called_once()
@@ -54,7 +57,8 @@ async def test_delete_button_default_fail():
     mock_cog.conversation_manager = Mock()
 
     # Active is default
-    mock_cog._get_active_conversation_id.return_value = "default"
+    mock_cog.context_service = Mock()
+    mock_cog.context_service.get_active_conversation_id = AsyncMock(return_value="default")
 
     button = DeleteButton(mock_cog, mock_ctx, LANG_EN)
     mock_interaction = AsyncMock()

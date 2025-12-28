@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from ..i18n import tr
+from ..core.i18n import tr
 
 
 class BackButton(discord.ui.Button):

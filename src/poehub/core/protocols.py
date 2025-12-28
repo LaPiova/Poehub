@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
-from .models import TokenUsage
+from ..models import TokenUsage
 
 
 @runtime_checkable
@@ -53,7 +53,7 @@ class ILLMClient(Protocol):
 
 
 @runtime_checkable
-class IConversationManager(Protocol):
+class IConversationStorageService(Protocol):
     """Interface for conversation storage management.
 
     Abstracts the encrypted storage layer for conversations.
@@ -132,3 +132,78 @@ class IEncryption(Protocol):
             Decrypted plaintext string.
         """
         ...
+
+
+@runtime_checkable
+class IChatService(Protocol):
+    """Interface for Chat Service."""
+
+    async def stream_response(
+        self,
+        ctx: Any,
+        messages: list[dict[str, Any]],
+        model: str,
+        target_channel: Any = None,
+        save_to_conv: tuple[int, str] | None = None,
+        billing_guild: Any = None,
+    ) -> None:
+        """Stream response to Discord."""
+        ...
+
+    async def get_response(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        billing_guild: Any = None,
+    ) -> str:
+        """Get a complete response string (non-streaming)."""
+        ...
+
+    async def send_split_message(self, destination: Any, content: str) -> None:
+        """Send a long message to Discord, splitting if necessary."""
+        ...
+
+
+@runtime_checkable
+class IContextService(Protocol):
+    """Interface for Context Service."""
+
+    async def get_active_conversation_id(self, user_id: int) -> str: ...
+    async def get_user_system_prompt(self, user_id: int) -> str | None: ...
+
+
+@runtime_checkable
+class ISummarizerService(Protocol):
+    """Interface for Summarizer Service."""
+
+    async def summarize_messages(
+        self,
+        messages: list[Any],  # list[MessageData]
+        user_id: int,
+        model: str,
+        billing_guild: Any = None,
+    ) -> AsyncIterator[str]:
+        """Generate a summary, yielding progress updates and final result."""
+        ...
+        yield ""
+
+
+@runtime_checkable
+class IPoeHub(Protocol):
+    """Interface for the main PoeHub cog."""
+
+    bot: Any
+    config: Any
+    conversation_manager: IConversationStorageService | None
+    chat_service: IChatService
+    context_service: IContextService
+    summarizer: ISummarizerService | None
+    allow_dummy_mode: bool
+
+    # UI Helpers
+    async def _build_model_select_options(
+        self, query: str | None = None
+    ) -> list[Any]: ...
+    async def _build_config_embed(
+        self, ctx: Any, owner_mode: bool, dummy_state: bool, lang: str
+    ) -> Any: ...

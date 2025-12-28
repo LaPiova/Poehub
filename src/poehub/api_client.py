@@ -17,7 +17,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from .pricing_oracle import PricingOracle, TokenUsage
+from .services.billing.oracle import PricingOracle, TokenUsage
 from .utils.logging import RequestContext
 
 # Check for provider libraries, but we might rely on HttpX for some

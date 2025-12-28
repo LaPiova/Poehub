@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
 
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
+from ..core.protocols import IPoeHub
 from .common import BackButton, CloseMenuButton
 from .summary_view import SummaryView
-
-if TYPE_CHECKING:  # pragma: no cover
-    from ..poehub import PoeHub
 
 
 class SummaryButton(discord.ui.Button):
     """Button to open the Message Summary view."""
 
-    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "FUNC_BTN_SUMMARY"),
             style=discord.ButtonStyle.primary,
@@ -67,7 +64,7 @@ class FunctionsMenuView(discord.ui.View):
 
     def __init__(
         self,
-        cog: PoeHub,
+        cog: IPoeHub,
         ctx: red_commands.Context,
         lang: str,
         back_callback: Callable[[discord.Interaction], Awaitable[None]] | None = None,
