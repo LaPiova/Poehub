@@ -5,7 +5,8 @@ from __future__ import annotations
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..core.i18n import tr
+from ..core.protocols import IPoeHub
 from .common import CloseMenuButton
 from .config_view import PoeConfigView
 from .conversation_view import ConversationMenuView
@@ -15,7 +16,7 @@ from .functions_view import FunctionsMenuView
 class SettingsButton(discord.ui.Button):
     """Button to open the Settings menu."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "HOME_BTN_SETTINGS"),
             style=discord.ButtonStyle.secondary,
@@ -60,7 +61,7 @@ class SettingsButton(discord.ui.Button):
             self.lang,
             back_callback=go_home,
         )
-        
+
         # We want to replace the current message
         await interaction.response.edit_message(embed=embed, view=view)
         view.message = interaction.message
@@ -69,7 +70,7 @@ class SettingsButton(discord.ui.Button):
 class ConversationsButton(discord.ui.Button):
     """Button to open the Conversations menu."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "HOME_BTN_CONV"),
             style=discord.ButtonStyle.primary,
@@ -97,9 +98,11 @@ class ConversationsButton(discord.ui.Button):
             await inter.response.edit_message(embed=embed, view=view)
             view.message = inter.message
 
-        view = ConversationMenuView(self.cog, self.ctx, self.lang, back_callback=go_home)
+        view = ConversationMenuView(
+            self.cog, self.ctx, self.lang, back_callback=go_home
+        )
         embed = await view.refresh_content(None)
-        
+
         await interaction.response.edit_message(embed=embed, view=view)
         view.message = interaction.message
 
@@ -107,7 +110,7 @@ class ConversationsButton(discord.ui.Button):
 class FunctionsButton(discord.ui.Button):
     """Button to open the Functions menu."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "HOME_BTN_FUNCTIONS"),
             style=discord.ButtonStyle.secondary,
@@ -135,7 +138,7 @@ class FunctionsButton(discord.ui.Button):
             description=tr(self.lang, "FUNC_DESC"),
             color=discord.Color.teal(),
         )
-        
+
         await interaction.response.edit_message(embed=embed, view=view)
         view.message = interaction.message
 
@@ -143,12 +146,12 @@ class FunctionsButton(discord.ui.Button):
 class HomeMenuView(discord.ui.View):
     """Unified Home Menu View."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
-        
+
         self.add_item(ConversationsButton(cog, ctx, lang))
         self.add_item(SettingsButton(cog, ctx, lang))
         self.add_item(FunctionsButton(cog, ctx, lang))

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import LANG_LABELS, SUPPORTED_LANGS, tr
-from ..prompt_utils import (
+from ..core.i18n import LANG_LABELS, SUPPORTED_LANGS, tr
+from ..utils.prompts import (
     PROMPT_PREFILL_LIMIT,
     PROMPT_TEXTINPUT_MAX,
     send_prompt_files_dm,
@@ -24,19 +25,19 @@ class PoeConfigView(discord.ui.View):
 
     def __init__(
         self,
-        cog: "PoeHub",
+        cog: PoeHub,
         ctx: red_commands.Context,
-        model_options: List[discord.SelectOption],
+        model_options: list[discord.SelectOption],
         owner_mode: bool,
         dummy_state: bool,
         lang: str,
-        back_callback: Optional[Callable[[discord.Interaction], Awaitable[None]]] = None,
+        back_callback: Callable[[discord.Interaction], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
-        self.message: Optional[discord.Message] = None
+        self.message: discord.Message | None = None
         self.owner_mode = owner_mode
         self.back_callback = back_callback
         lang = self.lang
@@ -51,7 +52,7 @@ class PoeConfigView(discord.ui.View):
         self.add_item(LanguageSelectButton(cog, ctx, lang))
 
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
-        
+
         if back_callback:
             self.add_item(BackButton(back_callback, lang))
 
@@ -78,7 +79,7 @@ class PoeConfigView(discord.ui.View):
 class ModelSearchModal(discord.ui.Modal):
     """Modal to search for models."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(title=tr(lang, "CONFIG_SEARCH_MODAL_TITLE"))
         self.cog = cog
         self.ctx = ctx
@@ -103,7 +104,7 @@ class ModelSearchModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
-        
+
         # Update the view with filtered options
         if hasattr(self, "origin_view") and self.origin_view:
             view = self.origin_view
@@ -111,17 +112,25 @@ class ModelSearchModal(discord.ui.Modal):
                 if isinstance(child, ModelSelect):
                     child.options = new_options
                     # Reset placeholder to show filter is active? or just count
-                    child.placeholder = tr(self.lang, "CONFIG_SEARCH_SUCCESS", count=len(new_options), query=query)
-                    break 
-            
+                    child.placeholder = tr(
+                        self.lang,
+                        "CONFIG_SEARCH_SUCCESS",
+                        count=len(new_options),
+                        query=query,
+                    )
+                    break
+
             await interaction.response.edit_message(view=view)
         else:
-            await interaction.response.send_message("❌ Error: Lost context.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ Error: Lost context.", ephemeral=True
+            )
+
 
 class SearchModelsButton(discord.ui.Button):
     """Button to open model search modal."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "CONFIG_BTN_SEARCH_MODEL"),
             style=discord.ButtonStyle.secondary,
@@ -137,14 +146,15 @@ class SearchModelsButton(discord.ui.Button):
         modal.origin_view = self.view
         await interaction.response.send_modal(modal)
 
+
 class ModelSelect(discord.ui.Select):
     """Dropdown for picking the default model."""
 
     def __init__(
         self,
-        cog: "PoeHub",
+        cog: PoeHub,
         ctx: red_commands.Context,
-        options: List[discord.SelectOption],
+        options: list[discord.SelectOption],
         lang: str,
     ) -> None:
         super().__init__(
@@ -171,11 +181,11 @@ class PromptModal(discord.ui.Modal):
 
     def __init__(
         self,
-        cog: "PoeHub",
+        cog: PoeHub,
         ctx: red_commands.Context,
         lang: str,
-        user_prompt: Optional[str],
-        fallback_prompt: Optional[str],
+        user_prompt: str | None,
+        fallback_prompt: str | None,
     ) -> None:
         super().__init__(title=tr(lang, "CONFIG_PROMPT_MODAL_TITLE"))
         self.cog = cog
@@ -184,7 +194,7 @@ class PromptModal(discord.ui.Modal):
         self._stored_prompt = user_prompt or ""
         self._append_mode = False
 
-        prefill_text: Optional[str] = None
+        prefill_text: str | None = None
         placeholder = tr(lang, "CONFIG_PROMPT_MODAL_PLACEHOLDER")
 
         if user_prompt:
@@ -236,7 +246,7 @@ class PromptModal(discord.ui.Modal):
 class SetPromptButton(discord.ui.Button):
     """Button to open the personal prompt modal."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "CONFIG_BTN_SET_PROMPT"),
             style=discord.ButtonStyle.primary,
@@ -256,7 +266,7 @@ class SetPromptButton(discord.ui.Button):
 class ShowPromptButton(discord.ui.Button):
     """Button to display the current prompt(s) in an embed."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "CONFIG_BTN_VIEW_PROMPT"),
             style=discord.ButtonStyle.secondary,
@@ -316,7 +326,7 @@ class ShowPromptButton(discord.ui.Button):
 class ClearPromptButton(discord.ui.Button):
     """Button to clear the user's personal prompt."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
             label=tr(lang, "CONFIG_BTN_CLEAR_PROMPT"),
             style=discord.ButtonStyle.secondary,
@@ -336,7 +346,7 @@ class ClearPromptButton(discord.ui.Button):
 class LanguageSelectButton(discord.ui.Button):
     """Button to open language selection dropdown."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         # Show current language in button label
         current_label = LANG_LABELS.get(lang, lang)
         super().__init__(
@@ -351,11 +361,11 @@ class LanguageSelectButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         # Create a dropdown for language selection
         select = ConfigLanguageSelect(self.cog, self.ctx, self.lang, self.view)
-        
+
         # Send as an ephemeral message with the dropdown
         temp_view = discord.ui.View(timeout=60)
         temp_view.add_item(select)
-        
+
         await interaction.response.send_message(
             tr(self.lang, "LANG_DESC"),
             view=temp_view,
@@ -368,10 +378,10 @@ class ConfigLanguageSelect(discord.ui.Select):
 
     def __init__(
         self,
-        cog: "PoeHub",
+        cog: PoeHub,
         ctx: red_commands.Context,
         lang: str,
-        parent_view: Optional[discord.ui.View] = None,
+        parent_view: discord.ui.View | None = None,
     ) -> None:
         options = []
         for code in SUPPORTED_LANGS:
@@ -399,7 +409,7 @@ class ConfigLanguageSelect(discord.ui.Select):
         code = self.values[0]
         await self.cog.config.user(self.ctx.author).language.set(code)
         label = LANG_LABELS.get(code, code)
-        
+
         # Update the button label in the parent view if possible
         if self.parent_view:
             for child in self.parent_view.children:
@@ -410,7 +420,7 @@ class ConfigLanguageSelect(discord.ui.Select):
             # Update the parent view's lang attribute
             if hasattr(self.parent_view, "lang"):
                 self.parent_view.lang = code
-        
+
         await interaction.response.send_message(
             tr(code, "LANG_SET_OK", language=label),
             ephemeral=True,
@@ -420,9 +430,17 @@ class ConfigLanguageSelect(discord.ui.Select):
 class DummyToggleButton(discord.ui.Button):
     """Owner-only toggle for offline dummy mode (if enabled by env flag)."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, enabled: bool, lang: str) -> None:
-        label = tr(lang, "CONFIG_BTN_DUMMY_ON") if enabled else tr(lang, "CONFIG_BTN_DUMMY_OFF")
-        style = discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+    def __init__(
+        self, cog: PoeHub, ctx: red_commands.Context, enabled: bool, lang: str
+    ) -> None:
+        label = (
+            tr(lang, "CONFIG_BTN_DUMMY_ON")
+            if enabled
+            else tr(lang, "CONFIG_BTN_DUMMY_OFF")
+        )
+        style = (
+            discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary
+        )
         super().__init__(label=label, style=style)
         self.cog = cog
         self.ctx = ctx
@@ -443,7 +461,9 @@ class DummyToggleButton(discord.ui.Button):
         )
 
         if not self.view:
-            await interaction.response.send_message("✅ Dummy API mode 狀態已更新。", ephemeral=True)
+            await interaction.response.send_message(
+                "✅ Dummy API mode 狀態已更新。", ephemeral=True
+            )
             return
 
         new_options = await self.cog._build_model_select_options()
@@ -452,8 +472,10 @@ class DummyToggleButton(discord.ui.Button):
                 child.options = new_options
                 break
 
-            owner_mode = getattr(self.view, "owner_mode", True)
-            embed = await self.cog._build_config_embed(self.ctx, owner_mode, new_state, self.lang)
+        owner_mode = getattr(self.view, "owner_mode", True)
+        embed = await self.cog._build_config_embed(
+            self.ctx, owner_mode, new_state, self.lang
+        )
         await interaction.response.edit_message(embed=embed, view=self.view)
         await interaction.followup.send(
             tr(self.lang, "CONFIG_DUMMY_ENABLED_OK")

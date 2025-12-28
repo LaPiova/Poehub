@@ -55,11 +55,13 @@ This will display a coverage report in the terminal, showing which lines of code
 ## Test Structure
 
 - **`tests/conftest.py`**: Shared fixtures (logging mocks, Red-DiscordBot mocks).
-- **`tests/test_api_client.py`**: Tests for `PoeClient` and `OpenAIProvider`, including streaming responses and error handling/retry logic.
-- **`tests/test_conversation_manager.py`**: Tests for conversation state, history pruning, and encryption integration.
-- **`tests/test_encryption.py`**: Tests for `EncryptionHelper` (Fernet encryption/decryption).
-- **`tests/test_i18n.py`**: Tests for internationalization helpers.
-- **`tests/test_pricing_oracle.py`**: Tests for cost calculation logic across different providers.
+- **`tests/test_api_client.py`**: Tests for `PoeClient` and `OpenAIProvider`.
+- **`tests/test_poehub.py`**: Main integration tests for the cog.
+- **`tests/services/`**: Unit tests for business logic services:
+  - `billing/`: Budget and cost tracking.
+  - `chat/`: Message processing and API interaction.
+  - `conversation/`: History management.
+- **`tests/ui/`**: Tests for Discord UI components (Views/Modals).
 
 ## Writing New Tests
 

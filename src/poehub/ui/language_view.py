@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import LANG_LABELS, SUPPORTED_LANGS, tr
+from ..core.i18n import LANG_LABELS, SUPPORTED_LANGS, tr
 from .common import CloseMenuButton
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -17,8 +17,8 @@ if TYPE_CHECKING:  # pragma: no cover
 class LanguageSelect(discord.ui.Select):
     """Dropdown to pick UI/help language."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
-        options: List[discord.SelectOption] = []
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
+        options: list[discord.SelectOption] = []
         for code in SUPPORTED_LANGS:
             label = LANG_LABELS.get(code, code)
             options.append(
@@ -51,12 +51,12 @@ class LanguageSelect(discord.ui.Select):
 class LanguageView(discord.ui.View):
     """Language selection view."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
-        self.message: Optional[discord.Message] = None
+        self.message: discord.Message | None = None
 
         self.add_item(LanguageSelect(cog, ctx, lang))
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
@@ -78,5 +78,3 @@ class LanguageView(discord.ui.View):
             await self.message.edit(view=self)
         except discord.HTTPException:
             pass
-
-

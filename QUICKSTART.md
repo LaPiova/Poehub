@@ -19,10 +19,13 @@ Follow the prompts to set up your Discord bot token.
 ~/start_bot.sh
 ```
 
-Or run in background:
-
+Or run in background with screen:
 ```bash
-~/start_bot_screen.sh
+# Start screen session
+screen -S poebot
+
+# Inside screen:
+~/start_bot.sh
 ```
 
 To attach to the screen session:

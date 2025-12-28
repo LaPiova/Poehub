@@ -39,6 +39,15 @@ if ! python3 -c "import pytest" &> /dev/null; then
     pip install -r requirements-dev.txt
 fi
 
+# Run Ruff Linting
+echo ""
+echo -e "${BLUE}Running Ruff Linting...${NC}"
+if ! ruff check .; then
+    echo -e "${RED}❌ Ruff linting failed! Please fix coding style issues.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Ruff linting passed!${NC}"
+
 # Run tests
 echo ""
 echo -e "${BLUE}Executing pytest...${NC}"

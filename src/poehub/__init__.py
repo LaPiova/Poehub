@@ -15,5 +15,3 @@ __red_end_user_data_statement__ = (
 )
 
 __all__ = ["PoeHub", "setup"]
-
-

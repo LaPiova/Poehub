@@ -1,6 +1,7 @@
-import pytest
 from unittest.mock import patch
-from poehub.i18n import tr, LANG_EN, STRINGS, LANG_ZH_TW, LANG_ZH_CN
+
+from poehub.core.i18n import LANG_EN, LANG_ZH_CN, LANG_ZH_TW, STRINGS, tr
+
 
 class TestI18n:
     def test_tr_en(self):
@@ -38,7 +39,7 @@ class TestI18n:
 
     def test_tr_zh_tw(self):
         # Test another language
-        key = "CLOSE_MENU" 
+        key = "CLOSE_MENU"
         # Assuming ZH_TW has this key
         result = tr(LANG_ZH_TW, key)
         assert result == "關閉"
