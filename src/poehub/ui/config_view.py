@@ -472,10 +472,10 @@ class DummyToggleButton(discord.ui.Button):
                 child.options = new_options
                 break
 
-            owner_mode = getattr(self.view, "owner_mode", True)
-            embed = await self.cog._build_config_embed(
-                self.ctx, owner_mode, new_state, self.lang
-            )
+        owner_mode = getattr(self.view, "owner_mode", True)
+        embed = await self.cog._build_config_embed(
+            self.ctx, owner_mode, new_state, self.lang
+        )
         await interaction.response.edit_message(embed=embed, view=self.view)
         await interaction.followup.send(
             tr(self.lang, "CONFIG_DUMMY_ENABLED_OK")
