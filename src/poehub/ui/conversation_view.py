@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional, TYPE_CHECKING
 
 import discord
@@ -138,6 +139,45 @@ class ClearHistoryButton(discord.ui.Button):
             await self.view.refresh_content(interaction, update_response=True)
 
 
+
+class NewConversationButton(discord.ui.Button):
+    """Button to create a new conversation."""
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONV_BTN_NEW"),
+            style=discord.ButtonStyle.success,
+            emoji="➕",
+            row=2,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not self.cog.conversation_manager:
+            await interaction.response.send_message(
+                tr(self.lang, "CONV_SYSTEM_NOT_INITIALIZED"), ephemeral=True
+            )
+            return
+
+        if not self.cog.conversation_manager:
+            await interaction.response.send_message(
+                tr(self.lang, "CONV_SYSTEM_NOT_INITIALIZED"), ephemeral=True
+            )
+            return
+
+        # Use helper to create and switch
+        await self.cog._create_and_switch_conversation(self.ctx.author.id)
+        
+        await interaction.response.send_message(
+            tr(self.lang, "UPDATED"), ephemeral=True
+        )
+        
+        if isinstance(self.view, ConversationMenuView):
+            await self.view.refresh_content(interaction, update_response=True)
+
+
 class RefreshButton(discord.ui.Button):
     """Button to refresh the conversation menu embed/options."""
 
@@ -252,6 +292,7 @@ class ConversationMenuView(discord.ui.View):
         if delete_options:
             self.add_item(DeleteConversationSelect(self.cog, self.ctx, delete_options, self.lang))
 
+        self.add_item(NewConversationButton(self.cog, self.ctx, self.lang))
         self.add_item(ClearHistoryButton(self.cog, self.ctx, self.lang))
         self.add_item(RefreshButton(self.lang))
         self.add_item(CloseMenuButton(label=tr(self.lang, "CLOSE_MENU")))

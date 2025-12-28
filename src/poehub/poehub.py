@@ -1113,6 +1113,21 @@ class PoeHub(red_commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("❌ Confirmation timeout.")
 
+    async def _create_and_switch_conversation(self, user_id: int, title: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+        """Helper to create a new conversation and switch to it."""
+        if not self.conversation_manager:
+            raise RuntimeError("Conversation manager not initialized")
+
+        conv_id = f"conv_{int(time.time())}"
+        
+        # Use manager to create
+        conv_data = self.conversation_manager.create_conversation(conv_id, title)
+        
+        await self._save_conversation(user_id, conv_id, conv_data)
+        await self._set_active_conversation(user_id, conv_id)
+        
+        return conv_id, conv_data
+
     @red_commands.command(name="newconv")
     async def new_conversation(self, ctx: red_commands.Context, *, title: str = None):
         """Create a new conversation"""
@@ -1120,15 +1135,10 @@ class PoeHub(red_commands.Cog):
             await ctx.send("❌ System not initialized.")
             return
 
-        conv_id = f"conv_{int(time.time())}"
-        
-        # Use manager to create
-        conv_data = self.conversation_manager.create_conversation(conv_id, title)
-        
-        await self._save_conversation(ctx.author.id, conv_id, conv_data)
-        await self._set_active_conversation(ctx.author.id, conv_id)
+        conv_id, conv_data = await self._create_and_switch_conversation(ctx.author.id, title)
         
         await ctx.send(f"✅ Created and switched to new conversation: **{conv_data['title']}**\nID: `{conv_id}`")
+
     
     @red_commands.command(name="switchconv")
     async def switch_conversation(self, ctx: red_commands.Context, conv_id: str):
