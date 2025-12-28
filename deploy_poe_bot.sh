@@ -159,7 +159,7 @@ fi
 print_status "Step 6: Installing startup scripts to $HOME..."
 
 # Copy scripts if they exist
-for script in start_bot.sh start_bot_screen.sh install_service.sh; do
+for script in start_bot.sh install_service.sh; do
     if [ -f "$SCRIPT_DIR/$script" ]; then
         cp "$SCRIPT_DIR/$script" "$HOME/$script"
         chmod +x "$HOME/$script"
@@ -185,7 +185,7 @@ echo ""
 echo "1. Start the bot:"
 echo "   ${GREEN}~/start_bot.sh${NC}"
 echo "   OR use screen:"
-echo "   ${GREEN}~/start_bot_screen.sh${NC}"
+echo "   OR use screen manually."
 echo ""
 echo "2. In Discord, add the custom cog repository:"
 echo "   ${YELLOW}[p]addpath $COGS_DIR${NC}"

@@ -16,6 +16,11 @@ class TestEncryptionHelper:
         helper = EncryptionHelper(key=key)
         assert helper.get_key() == key
 
+    def test_init_with_bytes_key(self):
+        key_bytes = Fernet.generate_key()
+        helper = EncryptionHelper(key=key_bytes)
+        assert helper.get_key() == key_bytes.decode()
+
     def test_encrypt_decrypt_string(self):
         helper = EncryptionHelper()
         original_data = "test_string"

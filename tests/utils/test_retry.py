@@ -114,3 +114,22 @@ async def test_retry_context_exhaustion():
                 await ctx.handle_error(e)
 
     assert attempts == 3
+
+@pytest.mark.asyncio
+async def test_retry_context_no_exception_stored():
+    """Test retry context when loop exits without exception."""
+    # This tests the safety fallback on line 82
+    attempts = 0
+
+    async def always_succeeds():
+        nonlocal attempts
+        attempts += 1
+        return "success"
+
+    async with RetryContext(max_attempts=3, base_delay=0.01) as ctx:
+        for _attempt in ctx:
+            result = await always_succeeds()
+            if result == "success":
+                break
+
+    assert attempts == 1

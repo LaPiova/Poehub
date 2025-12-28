@@ -174,29 +174,12 @@ BOT_SCRIPT
 chmod +x "$HOME/start_bot.sh"
 print_success "Startup script created at ~/start_bot.sh"
 
-###############################################################################
-# Step 7: Create Screen Session Helper
-###############################################################################
-print_status "Step 7: Creating screen session helper..."
 
-cat > "$HOME/start_bot_screen.sh" <<'SCREEN_SCRIPT'
-#!/bin/bash
-
-# Start bot in a detached screen session
-screen -dmS "${POEHUB_SCREEN_NAME:-poebot}" bash -c "source $HOME/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
-
-echo "Bot started in screen session 'poebot'"
-echo "To attach: screen -r poebot"
-echo "To detach: Press Ctrl+A then D"
-SCREEN_SCRIPT
-
-chmod +x "$HOME/start_bot_screen.sh"
-print_success "Screen helper created at ~/start_bot_screen.sh"
 
 ###############################################################################
-# Step 8: Create Systemd Service (Optional)
+# Step 7: Create Systemd Service (Optional)
 ###############################################################################
-print_status "Step 8: Creating systemd service file..."
+print_status "Step 7: Creating systemd service file..."
 
 SERVICE_NAME="${POEHUB_SERVICE_NAME:-poebot}"
 cat > "$HOME/${SERVICE_NAME}.service" <<'SERVICE_UNIT'
@@ -235,8 +218,7 @@ echo -e "${BLUE}Next Steps:${NC}"
 echo ""
 echo "1. Start the bot:"
 echo "   ${GREEN}~/start_bot.sh${NC}"
-echo "   OR use screen:"
-echo "   ${GREEN}~/start_bot_screen.sh${NC}"
+echo "   OR use screen manually."
 
 echo ""
 echo "2. In Discord, add the custom cog repository:"

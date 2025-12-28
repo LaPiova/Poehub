@@ -136,7 +136,8 @@ class TestAccessControl:
         modal = BudgetLimitModal(mock_cog, guild, view)
 
         interaction = AsyncMock()
-        interaction.response.is_done.return_value = False
+        # is_done is a property or regular method, not async
+        interaction.response.is_done = Mock(return_value=False)
 
         view.update_view = AsyncMock()
 

@@ -158,6 +158,7 @@ class PoeHub(red_commands.Cog):
 
         except Exception:
             log.exception("Error initializing PoeHub")
+            return
 
         # Start background tasks
         await self.billing.start_pricing_loop()

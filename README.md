@@ -331,11 +331,13 @@ The bot uses the standard OpenAI client for Poe, DeepSeek, and OpenRouter.
 ```
 Poehub/
 ├── src/poehub/             # Cog package (synced to $HOME/red-cogs/poehub/)
-│   ├── poehub.py           # Main cog logic
+│   ├── core/               # Core logic (encryption, i18n, protocols)
+│   ├── services/           # Business logic (chat, billing)
+│   ├── ui/                 # Discord UI views
+│   ├── utils/              # Utilities (logging, retry)
 │   ├── api_client.py       # API interaction layer
-│   ├── conversation_manager.py  # State and history management
-│   ├── encryption.py       # Encryption helper class
-│   ├── ui/                 # Discord UI views (dropdowns/buttons)
+│   ├── models.py           # Data models
+│   ├── poehub.py           # Main cog entry point
 │   ├── __init__.py         # Package initialization
 │   └── info.json           # Cog metadata
 ├── requirements.txt        # Python dependencies
@@ -353,8 +355,19 @@ Poehub/
 
 ### Background Mode (Screen)
 ```bash
-screen -dmS ${POEHUB_SCREEN_NAME:-poebot} bash -c "source ~/.redenv/bin/activate && redbot ${POEHUB_REDBOT_INSTANCE:-PoeBot}"
-screen -r ${POEHUB_SCREEN_NAME:-poebot}  # To attach to the session
+# Start a new screen session
+screen -S poebot
+
+# Inside the screen session:
+source ~/.redenv/bin/activate
+redbot PoeBot
+
+# Detach with Ctrl+A then D
+```
+
+To reattach:
+```bash
+screen -r poebot
 ```
 
 ### As a Systemd Service

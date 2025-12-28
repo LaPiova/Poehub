@@ -80,6 +80,45 @@ class TestPricingCrawler:
             rates = await PricingCrawler.fetch_rates()
             assert rates == {}
 
+    async def test_fetch_rates_invalid_numeric_data(self):
+        """Test handling of invalid numeric pricing data (ValueError/TypeError)."""
+        # Mock response with invalid numeric values (triggers lines 56-57)
+        html_content = """
+        <table>
+            <tr>
+                <td>model-1</td>
+                <td>invalid-price</td>
+                <td>not-a-number</td>
+            </tr>
+            <tr>
+                <td>model-2</td>
+                <td>None</td>
+                <td>10.5</td>
+            </tr>
+        </table>
+        """
+
+        mock_response = AsyncMock()
+        mock_response.text = AsyncMock(return_value=html_content)
+        mock_response.raise_for_status = AsyncMock()
+
+        get_ctx_mgr = MagicMock()
+        get_ctx_mgr.__aenter__.return_value = mock_response
+        get_ctx_mgr.__aexit__.return_value = None
+
+        mock_session_obj = MagicMock()
+        mock_session_obj.get.return_value = get_ctx_mgr
+
+        session_ctx_mgr = MagicMock()
+        session_ctx_mgr.__aenter__.return_value = mock_session_obj
+        session_ctx_mgr.__aexit__.return_value = None
+
+        with patch("aiohttp.ClientSession", return_value=session_ctx_mgr):
+            rates = await PricingCrawler.fetch_rates()
+
+        # Should skip invalid entries and return empty dict
+        assert rates == {}
+
 class TestPricingOracle:
     def setup_method(self):
         PricingOracle._DYNAMIC_RATES.clear()
@@ -150,6 +189,10 @@ class TestBillingService:
     async def test_start_pricing_loop(self, service, mock_bot):
         await service.start_pricing_loop()
         mock_bot.loop.create_task.assert_called_once()
+        # Close the coroutine to avoid "was never awaited" warning
+        args = mock_bot.loop.create_task.call_args[0]
+        if args and asyncio.iscoroutine(args[0]):
+            args[0].close()
 
     async def test_pricing_update_loop_success(self, service, mock_config):
         mock_rates = {"gpt-4": (30.0, 60.0, "USD")}

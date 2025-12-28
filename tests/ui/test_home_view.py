@@ -1,4 +1,5 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, patch
 
 import discord
 import pytest
@@ -12,13 +13,21 @@ with patch("poehub.core.i18n.tr", side_effect=lambda lang, key, **kwargs: key):
         SettingsButton,
     )
 
+def async_return(result=None):
+    def side_effect(*args, **kwargs):
+        f = asyncio.Future()
+        f.set_result(result)
+        return f
+    return MagicMock(side_effect=side_effect)
+
 @pytest.fixture
 def mock_cog():
     cog = MagicMock()
-    cog.config.use_dummy_api = AsyncMock(return_value=False)
-    cog._build_model_select_options = AsyncMock(return_value=[])
-    cog._build_config_embed = AsyncMock(return_value=discord.Embed())
-    cog.bot.is_owner = AsyncMock(return_value=False)
+
+    cog.config.use_dummy_api = async_return(False)
+    cog._build_model_select_options = async_return([])
+    cog._build_config_embed = async_return(discord.Embed())
+    cog.bot.is_owner = async_return(False)
     cog.allow_dummy_mode = True
 
     # Manager check
@@ -28,11 +37,13 @@ def mock_cog():
 
 @pytest.fixture
 def mock_ctx():
-    ctx = AsyncMock()
+    ctx = MagicMock()
     ctx.author.id = 12345
+    ctx.send = async_return()
     return ctx
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:coroutine 'AsyncMockMixin._execute_mock_call' was never awaited")
 class TestHomeView:
     async def test_view_init(self, mock_cog, mock_ctx):
         view = HomeMenuView(mock_cog, mock_ctx, "en")
@@ -41,12 +52,13 @@ class TestHomeView:
     async def test_interaction_check(self, mock_cog, mock_ctx):
         view = HomeMenuView(mock_cog, mock_ctx, "en")
 
-        interaction = AsyncMock()
+        interaction = MagicMock()
         interaction.user.id = 12345
         assert await view.interaction_check(interaction) is True
 
         interaction.user.id = 999
-        interaction.response = AsyncMock()
+        interaction.response = MagicMock()
+        interaction.response.send_message = async_return()
         assert await view.interaction_check(interaction) is False
 
     async def test_settings_button(self, mock_cog, mock_ctx):
@@ -56,11 +68,12 @@ class TestHomeView:
         with patch("poehub.ui.home_view.PoeConfigView") as MockConfigView, \
              patch("poehub.ui.home_view.HomeMenuView") as MockHomeView:
 
-            mock_config_view = AsyncMock()
+            mock_config_view = MagicMock()
             MockConfigView.return_value = mock_config_view
 
-            interaction = AsyncMock()
-            interaction.response.edit_message = AsyncMock()
+            interaction = MagicMock()
+            interaction.response = MagicMock()
+            interaction.response.edit_message = async_return()
 
             await btn.callback(interaction)
 
@@ -74,7 +87,9 @@ class TestHomeView:
             assert back_cb is not None
 
             # Executing back callback
-            inter_back = AsyncMock()
+            inter_back = MagicMock()
+            inter_back.response = MagicMock()
+            inter_back.response.edit_message = async_return()
             await back_cb(inter_back)
 
             MockHomeView.assert_called()
@@ -86,12 +101,13 @@ class TestHomeView:
         with patch("poehub.ui.home_view.ConversationMenuView") as MockConvView, \
              patch("poehub.ui.home_view.HomeMenuView") as MockHomeView:
 
-            mock_conv_view = AsyncMock()
-            mock_conv_view.refresh_content = AsyncMock(return_value=discord.Embed())
+            mock_conv_view = MagicMock()
+            mock_conv_view.refresh_content = async_return(discord.Embed())
             MockConvView.return_value = mock_conv_view
 
-            interaction = AsyncMock()
-            interaction.response.edit_message = AsyncMock()
+            interaction = MagicMock()
+            interaction.response = MagicMock()
+            interaction.response.edit_message = async_return()
 
             await btn.callback(interaction)
 
@@ -104,7 +120,9 @@ class TestHomeView:
             back_cb = args.get('back_callback')
             assert back_cb is not None
 
-            inter_back = AsyncMock()
+            inter_back = MagicMock()
+            inter_back.response = MagicMock()
+            inter_back.response.edit_message = async_return()
             await back_cb(inter_back)
 
             MockHomeView.assert_called()
@@ -113,7 +131,9 @@ class TestHomeView:
         mock_cog.conversation_manager = None
         btn = ConversationsButton(mock_cog, mock_ctx, "en")
 
-        interaction = AsyncMock()
+        interaction = MagicMock()
+        interaction.response = MagicMock()
+        interaction.response.send_message = async_return()
         await btn.callback(interaction)
 
         interaction.response.send_message.assert_called()
@@ -127,11 +147,12 @@ class TestHomeView:
         with patch("poehub.ui.home_view.FunctionsMenuView") as MockFuncView, \
              patch("poehub.ui.home_view.HomeMenuView") as MockHomeView:
 
-            mock_func_view = AsyncMock()
+            mock_func_view = MagicMock()
             MockFuncView.return_value = mock_func_view
 
-            interaction = AsyncMock()
-            interaction.response.edit_message = AsyncMock()
+            interaction = MagicMock()
+            interaction.response = MagicMock()
+            interaction.response.edit_message = async_return()
 
             await btn.callback(interaction)
 
@@ -142,7 +163,9 @@ class TestHomeView:
             args = MockFuncView.call_args[1]
             back_cb = args.get('back_callback')
 
-            inter_back = AsyncMock()
+            inter_back = MagicMock()
+            inter_back.response = MagicMock()
+            inter_back.response.edit_message = async_return()
             await back_cb(inter_back)
             MockHomeView.assert_called()
 
