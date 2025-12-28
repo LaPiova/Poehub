@@ -7,7 +7,7 @@ from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
 import discord
 from redbot.core import commands as red_commands
 
-from ..i18n import tr
+from ..i18n import LANG_LABELS, SUPPORTED_LANGS, tr
 from ..prompt_utils import (
     PROMPT_PREFILL_LIMIT,
     PROMPT_TEXTINPUT_MAX,
@@ -48,6 +48,7 @@ class PoeConfigView(discord.ui.View):
         self.add_item(SetPromptButton(cog, ctx, lang))
         self.add_item(ShowPromptButton(cog, ctx, lang))
         self.add_item(ClearPromptButton(cog, ctx, lang))
+        self.add_item(LanguageSelectButton(cog, ctx, lang))
 
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
         
@@ -328,6 +329,90 @@ class ClearPromptButton(discord.ui.Button):
         await self.cog.config.user(self.ctx.author).system_prompt.set(None)
         await interaction.response.send_message(
             tr(self.lang, "CONFIG_PROMPT_CLEARED"),
+            ephemeral=True,
+        )
+
+
+class LanguageSelectButton(discord.ui.Button):
+    """Button to open language selection dropdown."""
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        # Show current language in button label
+        current_label = LANG_LABELS.get(lang, lang)
+        super().__init__(
+            label=f"🌐 {current_label}",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        # Create a dropdown for language selection
+        select = ConfigLanguageSelect(self.cog, self.ctx, self.lang, self.view)
+        
+        # Send as an ephemeral message with the dropdown
+        temp_view = discord.ui.View(timeout=60)
+        temp_view.add_item(select)
+        
+        await interaction.response.send_message(
+            tr(self.lang, "LANG_DESC"),
+            view=temp_view,
+            ephemeral=True,
+        )
+
+
+class ConfigLanguageSelect(discord.ui.Select):
+    """Language dropdown for config view - reuses logic from LanguageView."""
+
+    def __init__(
+        self,
+        cog: "PoeHub",
+        ctx: red_commands.Context,
+        lang: str,
+        parent_view: Optional[discord.ui.View] = None,
+    ) -> None:
+        options = []
+        for code in SUPPORTED_LANGS:
+            label = LANG_LABELS.get(code, code)
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=code,
+                    default=(code == lang),
+                )
+            )
+
+        super().__init__(
+            placeholder=tr(lang, "LANG_SELECT_PLACEHOLDER"),
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        code = self.values[0]
+        await self.cog.config.user(self.ctx.author).language.set(code)
+        label = LANG_LABELS.get(code, code)
+        
+        # Update the button label in the parent view if possible
+        if self.parent_view:
+            for child in self.parent_view.children:
+                if isinstance(child, LanguageSelectButton):
+                    child.label = f"🌐 {label}"
+                    child.lang = code
+                    break
+            # Update the parent view's lang attribute
+            if hasattr(self.parent_view, "lang"):
+                self.parent_view.lang = code
+        
+        await interaction.response.send_message(
+            tr(code, "LANG_SET_OK", language=label),
             ephemeral=True,
         )
 
