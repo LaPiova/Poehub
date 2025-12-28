@@ -1,3 +1,1 @@
-"""Discord UI components for PoeHub."""
-
-
+from .home_view import HomeMenuView

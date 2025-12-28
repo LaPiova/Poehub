@@ -28,6 +28,7 @@ from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
 from .prompt_utils import prompt_to_file
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
+from .ui.home_view import HomeMenuView
 from .ui.language_view import LanguageView
 from .ui.provider_view import ProviderConfigView
 
@@ -98,7 +99,7 @@ class PoeHub(red_commands.Cog):
         }
         
         default_user = {
-            "model": "gpt-5.2",
+            "model": "Gemini-3-Pro",
             "conversations": {},  # Dict of conversation_id -> conversation data (encrypted)
             "active_conversation": "default",  # Currently active conversation ID
             "system_prompt": None,  # User's custom system prompt (overrides default)
@@ -161,7 +162,6 @@ class PoeHub(red_commands.Cog):
     async def _pricing_update_loop(self):
         """Background task to update pricing monthly (or daily for safety)."""
         await self.bot.wait_until_ready()
-        import asyncio
         while True:
             try:
                 # Update prices
@@ -383,7 +383,28 @@ class PoeHub(red_commands.Cog):
         # Fall back to default prompt
         return await self.config.default_system_prompt()
 
-    async def _build_model_select_options(self) -> List[discord.SelectOption]:
+    async def _get_matching_models(self, query: Optional[str] = None) -> List[str]:
+        """Fetch and filter models matching the query."""
+        if not self.client:
+            return []
+        
+        try:
+            models = await self.client.get_models()
+            model_ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
+            
+            # Filter distinct
+            unique_ids = list(dict.fromkeys(model_ids))
+            
+            if query:
+                query_lower = query.lower()
+                unique_ids = [mid for mid in unique_ids if query_lower in mid.lower()]
+            
+            return unique_ids
+        except Exception as exc:
+            log.warning("Could not fetch models: %s", exc)
+            return []
+
+    async def _build_model_select_options(self, query: Optional[str] = None) -> List[discord.SelectOption]:
         """Build dropdown options for the interactive config panel."""
         fallback_models = [
             "Claude-Sonnet-4.5",
@@ -400,23 +421,16 @@ class PoeHub(red_commands.Cog):
             "GPT-3.5-Turbo",
         ]
         options: List[discord.SelectOption] = []
-        seen: Set[str] = set()
+        
+        matching_ids = await self._get_matching_models(query)
+        
+        for model_id in matching_ids:
+            options.append(discord.SelectOption(label=model_id[:100], value=model_id))
+            if len(options) >= 25:
+                break
 
-        if self.client:
-            try:
-                models = await self.client.get_models()
-                for model in models:
-                    model_id = model.get("id") if isinstance(model, dict) else None
-                    if not model_id or model_id in seen:
-                        continue
-                    seen.add(model_id)
-                    options.append(discord.SelectOption(label=model_id[:100], value=model_id))
-                    if len(options) >= 25:
-                        break
-            except Exception as exc:  # noqa: BLE001 - best-effort UI hydration
-                log.warning("Could not fetch live model list for config menu: %s", exc)
-
-        if not options:
+        if not options and not query:
+            # Only show fallbacks if no query was provided AND no live models found
             for model_id in fallback_models:
                 options.append(discord.SelectOption(label=model_id, value=model_id))
 
@@ -508,6 +522,7 @@ class PoeHub(red_commands.Cog):
         
         # --- Handle Quote / Reply Context ---
         quote_context = ""
+        ref_msg = None
         if message.reference and message.reference.message_id:
             try:
                 # Attempt to fetch the referenced message
@@ -530,6 +545,12 @@ class PoeHub(red_commands.Cog):
         image_urls = []
         if message.attachments:
             for attachment in message.attachments:
+                if attachment.content_type and attachment.content_type.startswith("image/"):
+                    image_urls.append(attachment.url)
+        
+        # Also check referenced message for images
+        if ref_msg and ref_msg.attachments:
+            for attachment in ref_msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith("image/"):
                     image_urls.append(attachment.url)
         
@@ -593,6 +614,8 @@ class PoeHub(red_commands.Cog):
             # Create initial response message
             response_msg = await dest.send("🤔 Thinking...")
             
+            # accumulated_parts = [] # We will use a list for efficient appending
+            accumulated_parts = []
             accumulated_content = ""
             last_update = time.time()
             
@@ -608,15 +631,20 @@ class PoeHub(red_commands.Cog):
                     continue
                 
                 content = item
-                accumulated_content += content
+                accumulated_parts.append(content)
+                # We defer joining until we need to display or save
                 
                 # Update message every 2 seconds to avoid rate limits
                 current_time = time.time()
                 if current_time - last_update >= 2.0:
                     try:
+                        # Join locally for display
+                        # This operation is O(N) but happens rarely (every 2s)
+                        current_full_content = "".join(accumulated_parts)
+                        
                         # Discord has a 2000 char limit
-                        display_content = accumulated_content[:1900]
-                        if len(accumulated_content) > 1900:
+                        display_content = current_full_content[:1900]
+                        if len(current_full_content) > 1900:
                             display_content += "\n...(truncated)"
                         
                         await response_msg.edit(content=display_content)
@@ -625,6 +653,7 @@ class PoeHub(red_commands.Cog):
                         pass  # Ignore rate limit errors during streaming
             
             # Final update
+            accumulated_content = "".join(accumulated_parts)
             if accumulated_content:
                 # Split into chunks intelligently (Discord 2000 char limit)
                 chunks = self._split_message(accumulated_content)
@@ -892,7 +921,21 @@ class PoeHub(red_commands.Cog):
         else:
             await ctx.send("✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`.")
 
-    @red_commands.command(name="poeconfig", aliases=["config", "menu"])
+    @red_commands.command(name="menu", aliases=["poehub", "home"])
+    async def poehub_menu(self, ctx: red_commands.Context):
+        """Open the unified PoeHub Home Menu."""
+        lang = await self._get_language(ctx.author.id)
+        view = HomeMenuView(self, ctx, lang)
+        
+        embed = discord.Embed(
+             title=tr(lang, "HOME_TITLE"),
+             description=tr(lang, "HOME_DESC"),
+             color=discord.Color.blue(),
+        )
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    @red_commands.command(name="poeconfig", aliases=["config"])
     async def open_config_menu(self, ctx: red_commands.Context):
         """Open the interactive configuration panel"""
         lang = await self._get_language(ctx.author.id)
@@ -1099,6 +1142,21 @@ class PoeHub(red_commands.Cog):
         except asyncio.TimeoutError:
             await ctx.send("❌ Confirmation timeout.")
 
+    async def _create_and_switch_conversation(self, user_id: int, title: Optional[str] = None) -> Tuple[str, Dict[str, Any]]:
+        """Helper to create a new conversation and switch to it."""
+        if not self.conversation_manager:
+            raise RuntimeError("Conversation manager not initialized")
+
+        conv_id = f"conv_{int(time.time())}"
+        
+        # Use manager to create
+        conv_data = self.conversation_manager.create_conversation(conv_id, title)
+        
+        await self._save_conversation(user_id, conv_id, conv_data)
+        await self._set_active_conversation(user_id, conv_id)
+        
+        return conv_id, conv_data
+
     @red_commands.command(name="newconv")
     async def new_conversation(self, ctx: red_commands.Context, *, title: str = None):
         """Create a new conversation"""
@@ -1106,15 +1164,10 @@ class PoeHub(red_commands.Cog):
             await ctx.send("❌ System not initialized.")
             return
 
-        conv_id = f"conv_{int(time.time())}"
-        
-        # Use manager to create
-        conv_data = self.conversation_manager.create_conversation(conv_id, title)
-        
-        await self._save_conversation(ctx.author.id, conv_id, conv_data)
-        await self._set_active_conversation(ctx.author.id, conv_id)
+        conv_id, conv_data = await self._create_and_switch_conversation(ctx.author.id, title)
         
         await ctx.send(f"✅ Created and switched to new conversation: **{conv_data['title']}**\nID: `{conv_id}`")
+
     
     @red_commands.command(name="switchconv")
     async def switch_conversation(self, ctx: red_commands.Context, conv_id: str):
@@ -1318,9 +1371,7 @@ class PoeHub(red_commands.Cog):
             return
         
         try:
-            models = await self.client.get_models()
-            query_lower = query.lower()
-            matching = [m['id'] for m in models if query_lower in m['id'].lower()]
+            matching = await self._get_matching_models(query)
             
             if not matching:
                 await ctx.send(f"No models found matching `{query}`")

@@ -2,9 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Mapping, Optional
+
+from typing import Any, Awaitable, Callable, Iterable, List, Mapping, Optional
 
 import discord
+
+from ..i18n import tr
+
+
+class BackButton(discord.ui.Button):
+    """Button to navigate back to a parent view."""
+
+    def __init__(self, callback: Callable[[discord.Interaction], Awaitable[None]], lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "BTN_BACK"),
+            style=discord.ButtonStyle.secondary,
+            emoji="⬅️",
+            row=3,  # Place at bottom
+        )
+        self.go_back = callback
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.go_back(interaction)
 
 
 def preview_content(
@@ -53,7 +72,7 @@ class CloseMenuButton(discord.ui.Button):
     """Button to disable and close a view."""
 
     def __init__(self, *, label: str = "Close") -> None:
-        super().__init__(label=label, style=discord.ButtonStyle.danger)
+        super().__init__(label=label, style=discord.ButtonStyle.danger, row=3)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view = self.view
