@@ -9,6 +9,7 @@ from ..i18n import tr
 from .common import CloseMenuButton
 from .config_view import PoeConfigView
 from .conversation_view import ConversationMenuView
+from .functions_view import FunctionsMenuView
 
 
 class SettingsButton(discord.ui.Button):
@@ -103,6 +104,42 @@ class ConversationsButton(discord.ui.Button):
         view.message = interaction.message
 
 
+class FunctionsButton(discord.ui.Button):
+    """Button to open the Functions menu."""
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "HOME_BTN_FUNCTIONS"),
+            style=discord.ButtonStyle.secondary,
+            emoji="🛠️",
+            row=0,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        async def go_home(inter: discord.Interaction):
+            view = HomeMenuView(self.cog, self.ctx, self.lang)
+            embed = discord.Embed(
+                title=tr(self.lang, "HOME_TITLE"),
+                description=tr(self.lang, "HOME_DESC"),
+                color=discord.Color.blue(),
+            )
+            await inter.response.edit_message(embed=embed, view=view)
+            view.message = inter.message
+
+        view = FunctionsMenuView(self.cog, self.ctx, self.lang, back_callback=go_home)
+        embed = discord.Embed(
+            title=tr(self.lang, "FUNC_TITLE"),
+            description=tr(self.lang, "FUNC_DESC"),
+            color=discord.Color.teal(),
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=view)
+        view.message = interaction.message
+
+
 class HomeMenuView(discord.ui.View):
     """Unified Home Menu View."""
 
@@ -114,6 +151,7 @@ class HomeMenuView(discord.ui.View):
         
         self.add_item(ConversationsButton(cog, ctx, lang))
         self.add_item(SettingsButton(cog, ctx, lang))
+        self.add_item(FunctionsButton(cog, ctx, lang))
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:

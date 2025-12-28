@@ -11,12 +11,13 @@ async def test_home_view_init():
     
     view = HomeMenuView(mock_cog, mock_ctx, LANG_EN)
     
-    # Needs: Settings, Conversations, Close
-    assert len(view.children) == 3
+    # Needs: Settings, Conversations, Functions, Close
+    assert len(view.children) == 4
     
     labels = [child.label for child in view.children]
     assert "Settings" in labels
     assert "Conversations" in labels
+    assert "Functions" in labels
     assert "Close" in labels
 
 @pytest.mark.asyncio
