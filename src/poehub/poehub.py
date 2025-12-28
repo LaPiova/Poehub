@@ -582,6 +582,33 @@ class PoeHub(red_commands.Cog):
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
         
+        # --- Determine Response Target ---
+        # In guild channels, create a thread under the message to avoid spamming
+        # DMs don't support threads, so respond directly there
+        # If already in a thread, respond in the same thread (no nested threads)
+        response_target = target_channel
+        
+        is_already_thread = isinstance(target_channel, discord.Thread)
+        
+        if not isinstance(target_channel, discord.DMChannel) and not is_already_thread and hasattr(message, 'create_thread'):
+            try:
+                # Create a thread under the user's message
+                # Use a short descriptive name based on the message content
+                thread_name = content[:50] + "..." if len(content) > 50 else content
+                if not thread_name.strip():
+                    thread_name = "AI Response"
+                
+                # Create the thread
+                thread = await message.create_thread(
+                    name=thread_name,
+                    auto_archive_duration=60  # Auto-archive after 1 hour of inactivity
+                )
+                response_target = thread
+            except (discord.Forbidden, discord.HTTPException) as e:
+                # If thread creation fails (e.g., no permission),
+                # fall back to responding in the channel directly
+                log.warning(f"Could not create thread for AI response: {e}")
+        
         # --- Stream Response ---
         # We need a context-like object or channel to send to. 
         # _stream_response writes to 'ctx' if provided, or 'target_channel' if provided
@@ -589,7 +616,7 @@ class PoeHub(red_commands.Cog):
             ctx=ctx,
             messages=messages,
             model=user_model,
-            target_channel=target_channel,
+            target_channel=response_target,
             save_to_conv=(user.id, active_conv_id),
             billing_guild=billing_guild
         )
@@ -1391,7 +1418,7 @@ class PoeHub(red_commands.Cog):
 
     @red_commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Listen for messages (DMs or Mentions)"""
+        """Listen for messages (DMs, Mentions, or Bot-owned Threads)"""
         # Ignore bot messages
         if message.author.bot:
             return
@@ -1409,9 +1436,15 @@ class PoeHub(red_commands.Cog):
         # We check if the bot is actually mentioned in the message text or reply
         is_mentioned = self.bot.user in message.mentions
         
-        # If quoting the bot, that counts as a mention usually, but let's be strict:
-        # User must explicitly mention @Bot or be in DM.
-        if not is_dm and not is_mentioned:
+        # 3. Listen for messages in threads owned by the bot
+        # This allows conversational replies without requiring mentions
+        is_bot_thread = (
+            isinstance(message.channel, discord.Thread) and 
+            message.channel.owner_id == self.bot.user.id
+        )
+        
+        # Respond if: DM, mentioned, or in a bot-owned thread
+        if not is_dm and not is_mentioned and not is_bot_thread:
             return
 
         # Prepare content
