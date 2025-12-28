@@ -1,19 +1,38 @@
 # Tooling configuration for PoeHub.
 #
-# This repo follows (a close approximation of) the Google Python Style Guide.
-# Use `yapf` + `isort` if you want an auto-formatter/import-sorter that matches
-# Google conventions.
+# This repo uses Ruff for linting and formatting (replacing yapf/isort).
+# Ruff is 10-100x faster and consolidates multiple tools.
 
-[tool.yapf]
-based_on_style = "google"
-column_limit = 80
-dedent_closing_brackets = true
-coalesce_brackets = true
+[project]
+name = "poehub"
+version = "1.2.0"
+requires-python = ">=3.11"
 
-[tool.isort]
-profile = "google"
-line_length = 80
-known_first_party = ["poehub"]
-src_paths = ["src"]
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src"]
 
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "ASYNC",  # flake8-async
+]
+ignore = [
+    "E501",   # line length (handled by formatter)
+    "E402",   # module level import not at top (needed for conditional imports)
+]
 
+[tool.ruff.lint.isort]
+known-first-party = ["poehub"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

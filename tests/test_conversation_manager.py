@@ -1,8 +1,10 @@
-import pytest
-import time
 from unittest.mock import MagicMock
+
+import pytest
+
 from poehub.conversation_manager import ConversationManager
 from poehub.encryption import EncryptionHelper
+
 
 class TestConversationManager:
     @pytest.fixture
@@ -27,10 +29,10 @@ class TestConversationManager:
     def test_add_message_history_pruning(self, manager):
         conv = manager.create_conversation("test_id")
         max_history = 5
-        
+
         for i in range(10):
             manager.add_message(conv, "user", f"msg {i}", max_history=max_history)
-            
+
         assert len(conv["messages"]) == max_history
         # Should contain the last messages (5 to 9)
         assert conv["messages"][0]["content"] == "msg 5"
@@ -46,7 +48,7 @@ class TestConversationManager:
         conv = manager.create_conversation("test_id")
         manager.add_message(conv, "user", "Hello")
         manager.add_message(conv, "assistant", "Hi there")
-        
+
         api_msgs = manager.get_api_messages(conv)
         assert len(api_msgs) == 2
         # API messages shouldn't have extra fields like timestamp
@@ -59,7 +61,7 @@ class TestConversationManager:
         # Encrypt it
         encrypted = manager.prepare_for_storage(conv)
         assert isinstance(encrypted, str)
-        
+
         # Process it back
         decrypted = manager.process_conversation_data(encrypted)
         assert decrypted == conv
@@ -77,5 +79,5 @@ class TestConversationManager:
         # Mock encryption helper to fail
         manager.encryption = MagicMock()
         manager.encryption.decrypt.return_value = None
-        
+
         assert manager.process_conversation_data("garbage") is None

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import io
-from typing import List, Tuple, Union
 
 import discord
 
-PromptPayload = Tuple[str, str]
+PromptPayload = tuple[str, str]
 
 PROMPT_PREFILL_LIMIT = 1200  # Switch modal to append-only mode when exceeded
 PROMPT_TEXTINPUT_MAX = 1500  # Discord text input max length
@@ -21,8 +20,8 @@ def prompt_to_file(content: str, filename: str) -> discord.File:
 
 
 async def send_prompt_files_dm(
-    user: Union[discord.User, discord.Member],
-    payloads: List[PromptPayload],
+    user: discord.User | discord.Member,
+    payloads: list[PromptPayload],
     message: str,
 ) -> bool:
     """Send prompt text files via DM. Returns True if successful."""

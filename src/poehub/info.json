@@ -1,15 +1,33 @@
 {
-    "author": ["PoeHub Team"],
+    "author": [
+        "PoeHub Team"
+    ],
     "name": "PoeHub",
     "description": "A Red-DiscordBot Cog that connects to multiple LLM APIs: Poe, OpenAI, Anthropic (Claude), Google (Gemini), DeepSeek, and OpenRouter. Features multi-model switching, encrypted conversation history, and more.",
     "short": "Multi-provider LLM integration for Red-DiscordBot",
     "install_msg": "Thank you for installing PoeHub! Use [p]load poehub to load the cog. Set your provider with [p]setprovider and API key with [p]setapikey. For help, use [p]help PoeHub.",
-    "tags": ["poe", "openai", "anthropic", "gemini", "deepseek", "openrouter", "ai", "chatbot"],
-    "requirements": ["openai", "anthropic", "google-generativeai", "cryptography"],
+    "tags": [
+        "poe",
+        "openai",
+        "anthropic",
+        "gemini",
+        "deepseek",
+        "openrouter",
+        "ai",
+        "chatbot"
+    ],
+    "requirements": [
+        "openai",
+        "anthropic",
+        "google-generativeai",
+        "cryptography",
+        "httpx",
+        "tenacity",
+        "pydantic"
+    ],
     "min_bot_version": "3.5.0",
     "hidden": false,
     "disabled": false,
     "type": "COG",
     "end_user_data_statement": "This cog stores user preferences (model selection, private mode) and optionally conversation history. All data is encrypted using Fernet encryption. Users can purge their data anytime with [p]purge_my_data."
 }
-

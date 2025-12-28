@@ -5,22 +5,20 @@ PoeHub supports per-user language selection. Keep translations short and clear.
 
 from __future__ import annotations
 
-from typing import Dict
-
 LANG_EN = "en"
 LANG_ZH_TW = "zh-TW"
 LANG_ZH_CN = "zh-CN"
 
 SUPPORTED_LANGS = (LANG_EN, LANG_ZH_TW, LANG_ZH_CN)
 
-LANG_LABELS: Dict[str, str] = {
+LANG_LABELS: dict[str, str] = {
     LANG_EN: "English",
     LANG_ZH_TW: "繁體中文",
     LANG_ZH_CN: "简体中文",
 }
 
 
-STRINGS: Dict[str, Dict[str, str]] = {
+STRINGS: dict[str, dict[str, str]] = {
     LANG_EN: {
         # Generic / shared
         "CLOSE_MENU": "Close",

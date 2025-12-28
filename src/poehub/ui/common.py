@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-
-from typing import Any, Awaitable, Callable, Iterable, List, Mapping, Optional
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 import discord
 
@@ -13,7 +13,9 @@ from ..i18n import tr
 class BackButton(discord.ui.Button):
     """Button to navigate back to a parent view."""
 
-    def __init__(self, callback: Callable[[discord.Interaction], Awaitable[None]], lang: str) -> None:
+    def __init__(
+        self, callback: Callable[[discord.Interaction], Awaitable[None]], lang: str
+    ) -> None:
         super().__init__(
             label=tr(lang, "BTN_BACK"),
             style=discord.ButtonStyle.secondary,
@@ -50,7 +52,7 @@ def preview_content(
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
-        parts: List[str] = []
+        parts: list[str] = []
         for block in content:
             if isinstance(block, Mapping) and block.get("type") == "text":
                 value = block.get("text")
@@ -82,5 +84,3 @@ class CloseMenuButton(discord.ui.Button):
             child.disabled = True
         view.stop()
         await interaction.response.edit_message(view=view)
-
-

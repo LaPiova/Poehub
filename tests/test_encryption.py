@@ -1,8 +1,9 @@
-import pytest
 import base64
-import json
+
 from cryptography.fernet import Fernet
+
 from poehub.encryption import EncryptionHelper, generate_key
+
 
 class TestEncryptionHelper:
     def test_init_generates_key(self):
@@ -41,7 +42,7 @@ class TestEncryptionHelper:
     def test_decrypt_invalid_data(self):
         helper = EncryptionHelper()
         assert helper.decrypt("invalid_base64_string") is None
-        
+
         # Valid base64 but invalid fernet token
         invalid_token = base64.b64encode(b"not a valid token").decode()
         assert helper.decrypt(invalid_token) is None
@@ -50,11 +51,11 @@ class TestEncryptionHelper:
         helper = EncryptionHelper()
         data = {"field1": "value1", "field2": 100}
         encrypted_dict = helper.encrypt_dict(data)
-        
+
         assert "field1" in encrypted_dict
         assert "field2" in encrypted_dict
         assert encrypted_dict["field1"] != "value1"
-        
+
         decrypted_dict = helper.decrypt_dict(encrypted_dict)
         assert decrypted_dict == data
 
@@ -65,6 +66,7 @@ class TestEncryptionHelper:
     def test_decrypt_dict_empty(self):
         helper = EncryptionHelper()
         assert helper.decrypt_dict({}) == {}
+
 
 def test_generate_key_function():
     key = generate_key()

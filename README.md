@@ -60,7 +60,7 @@ This will:
 ```bash
 python3 -m venv ~/.redenv
 source ~/.redenv/bin/activate
-pip install Red-DiscordBot openai anthropic google-generativeai cryptography
+pip install Red-DiscordBot openai anthropic google-generativeai cryptography httpx tenacity pydantic
 ```
 
 2. **Set up Red-DiscordBot**:

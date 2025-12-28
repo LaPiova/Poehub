@@ -106,7 +106,7 @@ pip install --upgrade pip setuptools wheel
 pip install Red-DiscordBot
 
 # Install PoeHub dependencies
-pip install openai anthropic google-generativeai cryptography
+pip install openai anthropic google-generativeai cryptography httpx tenacity pydantic
 
 print_success "All packages installed!"
 
