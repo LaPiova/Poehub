@@ -383,7 +383,28 @@ class PoeHub(red_commands.Cog):
         # Fall back to default prompt
         return await self.config.default_system_prompt()
 
-    async def _build_model_select_options(self) -> List[discord.SelectOption]:
+    async def _get_matching_models(self, query: Optional[str] = None) -> List[str]:
+        """Fetch and filter models matching the query."""
+        if not self.client:
+            return []
+        
+        try:
+            models = await self.client.get_models()
+            model_ids = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
+            
+            # Filter distinct
+            unique_ids = list(dict.fromkeys(model_ids))
+            
+            if query:
+                query_lower = query.lower()
+                unique_ids = [mid for mid in unique_ids if query_lower in mid.lower()]
+            
+            return unique_ids
+        except Exception as exc:
+            log.warning("Could not fetch models: %s", exc)
+            return []
+
+    async def _build_model_select_options(self, query: Optional[str] = None) -> List[discord.SelectOption]:
         """Build dropdown options for the interactive config panel."""
         fallback_models = [
             "Claude-Sonnet-4.5",
@@ -400,23 +421,16 @@ class PoeHub(red_commands.Cog):
             "GPT-3.5-Turbo",
         ]
         options: List[discord.SelectOption] = []
-        seen: Set[str] = set()
+        
+        matching_ids = await self._get_matching_models(query)
+        
+        for model_id in matching_ids:
+            options.append(discord.SelectOption(label=model_id[:100], value=model_id))
+            if len(options) >= 25:
+                break
 
-        if self.client:
-            try:
-                models = await self.client.get_models()
-                for model in models:
-                    model_id = model.get("id") if isinstance(model, dict) else None
-                    if not model_id or model_id in seen:
-                        continue
-                    seen.add(model_id)
-                    options.append(discord.SelectOption(label=model_id[:100], value=model_id))
-                    if len(options) >= 25:
-                        break
-            except Exception as exc:  # noqa: BLE001 - best-effort UI hydration
-                log.warning("Could not fetch live model list for config menu: %s", exc)
-
-        if not options:
+        if not options and not query:
+            # Only show fallbacks if no query was provided AND no live models found
             for model_id in fallback_models:
                 options.append(discord.SelectOption(label=model_id, value=model_id))
 
@@ -1357,9 +1371,7 @@ class PoeHub(red_commands.Cog):
             return
         
         try:
-            models = await self.client.get_models()
-            query_lower = query.lower()
-            matching = [m['id'] for m in models if query_lower in m['id'].lower()]
+            matching = await self._get_matching_models(query)
             
             if not matching:
                 await ctx.send(f"No models found matching `{query}`")

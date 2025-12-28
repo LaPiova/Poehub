@@ -44,6 +44,7 @@ class PoeConfigView(discord.ui.View):
         if model_options:
             self.add_item(ModelSelect(cog, ctx, model_options, lang))
 
+        self.add_item(SearchModelsButton(cog, ctx, lang))
         self.add_item(SetPromptButton(cog, ctx, lang))
         self.add_item(ShowPromptButton(cog, ctx, lang))
         self.add_item(ClearPromptButton(cog, ctx, lang))
@@ -72,6 +73,68 @@ class PoeConfigView(discord.ui.View):
         except discord.HTTPException:
             pass
 
+
+class ModelSearchModal(discord.ui.Modal):
+    """Modal to search for models."""
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(title=tr(lang, "CONFIG_SEARCH_MODAL_TITLE"))
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+        self.query = discord.ui.TextInput(
+            label=tr(lang, "CONFIG_SEARCH_MODAL_LABEL"),
+            style=discord.TextStyle.short,
+            placeholder=tr(lang, "CONFIG_SEARCH_MODAL_PLACEHOLDER"),
+            required=True,
+            max_length=50,
+        )
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        query = self.query.value.strip()
+        new_options = await self.cog._build_model_select_options(query)
+
+        if not new_options:
+            await interaction.response.send_message(
+                tr(self.lang, "CONFIG_SEARCH_NO_RESULTS", query=query),
+                ephemeral=True,
+            )
+            return
+        
+        # Update the view with filtered options
+        if hasattr(self, "origin_view") and self.origin_view:
+            view = self.origin_view
+            for child in view.children:
+                if isinstance(child, ModelSelect):
+                    child.options = new_options
+                    # Reset placeholder to show filter is active? or just count
+                    child.placeholder = tr(self.lang, "CONFIG_SEARCH_SUCCESS", count=len(new_options), query=query)
+                    break 
+            
+            await interaction.response.edit_message(view=view)
+        else:
+            await interaction.response.send_message("❌ Error: Lost context.", ephemeral=True)
+
+class SearchModelsButton(discord.ui.Button):
+    """Button to open model search modal."""
+
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+        super().__init__(
+            label=tr(lang, "CONFIG_BTN_SEARCH_MODEL"),
+            style=discord.ButtonStyle.secondary,
+            emoji="🔍",
+            row=1,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        modal = ModelSearchModal(self.cog, self.ctx, self.lang)
+        modal.origin_view = self.view
+        await interaction.response.send_modal(modal)
 
 class ModelSelect(discord.ui.Select):
     """Dropdown for picking the default model."""
