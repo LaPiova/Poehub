@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from .context import ContextService
     from .conversation.storage import ConversationStorageService
 
+from ..core import ThreadSafeMemory
+
 log = logging.getLogger("red.poehub.services.chat")
 
 
@@ -41,6 +43,9 @@ class ChatService:
         self.conversation_manager = conversation_manager
 
         self.client: BaseLLMClient | None = None
+
+        # Memory Cache: "user_id:conv_id" -> ThreadSafeMemory
+        self._memories: dict[str, ThreadSafeMemory] = {}
 
         # Allow dummy mode from environment flag (passed down or checked here)
         # For simplicity, we'll check the config directly,
@@ -461,17 +466,61 @@ class ChatService:
         )
         await self.config.user_from_id(user_id).conversations.set(conversations)
 
+    async def _get_memory(self, user_id: int, conv_id: str) -> ThreadSafeMemory:
+        """Get or initialize the ThreadSafeMemory for a conversation."""
+        key = f"{user_id}:{conv_id}"
+        if key not in self._memories:
+            # Load existing messages from storage
+            conv = await self._get_or_create_conversation(user_id, conv_id)
+            messages = conv.get("messages", [])
+            self._memories[key] = ThreadSafeMemory(messages)
+        return self._memories[key]
+
     async def _add_message_to_conversation(
         self, user_id: int, conv_id: str, role: str, content: Any
     ):
-        """Add message to conversation."""
+        """Add message to conversation using ThreadSafeMemory."""
+        memory = await self._get_memory(user_id, conv_id)
+
+        # Prepare the message object (mimicking storage format)
+        new_msg = {"role": role, "content": content, "timestamp": time.time()}
+
+        # Add to memory (thread-safe)
+        await memory.add_message(new_msg)
+
+        # Write-through to persistence
+        # We fetch the full list from memory to ensure we catch any concurrent updates
+        # committed to the sequence.
+        all_messages = await memory.get_messages()
+
+        # Enforce history limit (redundant but safe to do here or in storage service)
+        #Ideally storage service handles this, but since we are bypassing
+        # storage.add_message to use direct memory manipulation, we should prune here
+        # OR just push the full list to storage and let it handle/overwrite.
+        # However, conversation_manager.add_message does the pruning logic.
+        # To reuse that logic without race we should probably rely on memory first.
+
+        # Simple Pruning for safer write-back
+        MAX_HISTORY = 50
+        if len(all_messages) > MAX_HISTORY:
+            all_messages = all_messages[-MAX_HISTORY:]
+            # Ideally update memory buffer too?
+            # ThreadSafeMemory doesn't have a 'replace' method exposed yet easily without clear+add.
+            # For now, we just save the pruned list to disk.
+
         conv = await self._get_or_create_conversation(user_id, conv_id)
-        updated_conv = self.conversation_manager.add_message(conv, role, content)
-        await self._save_conversation(user_id, conv_id, updated_conv)
+        conv["messages"] = all_messages
+        await self._save_conversation(user_id, conv_id, conv)
 
     async def _get_conversation_messages(
         self, user_id: int, conv_id: str
     ) -> list[dict[str, str]]:
-        """Get messages formatted for API."""
-        conv = await self._get_conversation(user_id, conv_id)
-        return self.conversation_manager.get_api_messages(conv) if conv else []
+        """Get messages formatted for API from memory."""
+        memory = await self._get_memory(user_id, conv_id)
+        messages = await memory.get_messages()
+
+        return [
+            {"role": msg["role"], "content": msg["content"]}
+            for msg in messages
+        ]
+

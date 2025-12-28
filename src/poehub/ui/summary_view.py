@@ -83,7 +83,7 @@ class CustomTimeModal(discord.ui.Modal):
         self.lang = lang
         self.hours = discord.ui.TextInput(
             label=tr(lang, "SUMMARY_CUSTOM_HOURS_LABEL"),
-            placeholder="1-168",
+            placeholder="1-7200",
             required=True,
             max_length=5,
         )
@@ -92,7 +92,7 @@ class CustomTimeModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
             val = float(self.hours.value)
-            if val <= 0 or val > 168:
+            if val <= 0 or val > 7200:
                 raise ValueError
             self.parent_view.selected_hours = val
             await self.parent_view.update_embed(interaction)
