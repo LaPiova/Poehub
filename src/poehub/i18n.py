@@ -9,12 +9,14 @@ from typing import Dict
 
 LANG_EN = "en"
 LANG_ZH_TW = "zh-TW"
+LANG_ZH_CN = "zh-CN"
 
-SUPPORTED_LANGS = (LANG_EN, LANG_ZH_TW)
+SUPPORTED_LANGS = (LANG_EN, LANG_ZH_TW, LANG_ZH_CN)
 
 LANG_LABELS: Dict[str, str] = {
     LANG_EN: "English",
     LANG_ZH_TW: "繁體中文",
+    LANG_ZH_CN: "简体中文",
 }
 
 
@@ -24,6 +26,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CLOSE_MENU": "Close",
         "RESTRICTED_MENU": "This menu is restricted to the user who opened it.",
         "UPDATED": "✅ Updated.",
+        "BTN_BACK": "Back",
         # Language
         "LANG_TITLE": "🌐 Language",
         "LANG_DESC": "Choose the language PoeHub will use for menus and help.",
@@ -89,6 +92,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CONV_BTN_CLEAR_HISTORY": "Clear history",
         "CONV_BTN_REFRESH": "Refresh",
         "CONV_BTN_NEW": "New Conversation",
+        "CONV_BTN_DELETE": "Delete",
         "CONV_DEFAULT_LABEL": "Default",
         "CONV_OPTION_DESC": "Messages: {count}",
         "CONV_DELETED_OK": "✅ Deleted conversation **{title}**.",
@@ -98,6 +102,11 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CONV_SYSTEM_NOT_INITIALIZED": "❌ System not initialized.",
         "CONV_EMPTY": "*Empty*",
         "CONV_NON_TEXT": "[non-text content]",
+        # Home Menu
+        "HOME_TITLE": "🏠 PoeHub Home",
+        "HOME_DESC": "Welcome! Choose an option below.",
+        "HOME_BTN_SETTINGS": "Settings",
+        "HOME_BTN_CONV": "Conversations",
         # Help
         "HELP_TITLE": "📖 PoeHub Help",
         "HELP_DESC": "Core commands and tips.",
@@ -113,6 +122,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CLOSE_MENU": "關閉",
         "RESTRICTED_MENU": "此選單僅限開啟者使用。",
         "UPDATED": "✅ 已更新。",
+        "BTN_BACK": "返回",
         # Language
         "LANG_TITLE": "🌐 語言",
         "LANG_DESC": "選擇 PoeHub 在選單與說明中使用的語言。",
@@ -176,6 +186,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CONV_BTN_CLEAR_HISTORY": "清除紀錄",
         "CONV_BTN_REFRESH": "重新整理",
         "CONV_BTN_NEW": "新對話",
+        "CONV_BTN_DELETE": "刪除",
         "CONV_DEFAULT_LABEL": "預設",
         "CONV_OPTION_DESC": "訊息: {count}",
         "CONV_DELETED_OK": "✅ 已刪除對話 **{title}**。",
@@ -185,6 +196,11 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "CONV_SYSTEM_NOT_INITIALIZED": "❌ 系統尚未初始化。",
         "CONV_EMPTY": "＊空＊",
         "CONV_NON_TEXT": "［非文字內容］",
+        # Home Menu
+        "HOME_TITLE": "🏠 PoeHub 首頁",
+        "HOME_DESC": "歡迎！請選擇下方功能。",
+        "HOME_BTN_SETTINGS": "設定",
+        "HOME_BTN_CONV": "對話管理",
         # Help
         "HELP_TITLE": "📖 PoeHub 說明",
         "HELP_DESC": "常用指令與提示。",
@@ -194,6 +210,100 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "HELP_SECTION_SETTINGS": "設定",
         "HELP_LINE": "`{cmd}` — {desc}",
         "HELP_LANG_HINT": "提示：使用 `{cmd}` 切換語言。",
+    },
+    LANG_ZH_CN: {
+        # Generic / shared
+        "CLOSE_MENU": "关闭",
+        "RESTRICTED_MENU": "此菜单仅限开启者使用。",
+        "UPDATED": "✅ 已更新。",
+        "BTN_BACK": "返回",
+        # Language
+        "LANG_TITLE": "🌐 语言",
+        "LANG_DESC": "选择 PoeHub 在菜单与说明中使用的语言。",
+        "LANG_CURRENT": "当前语言",
+        "LANG_SET_OK": "✅ 语言已设置为：{language}。",
+        "LANG_SELECT_PLACEHOLDER": "选择语言",
+        # Config UI
+        "CONFIG_TITLE": "⚙️ PoeHub 设置",
+        "CONFIG_DESC": "使用下方菜单更新默认模型与个人提示词。",
+        "CONFIG_FIELD_MODEL": "默认模型",
+        "CONFIG_FIELD_PROMPT": "个人提示词",
+        "CONFIG_PROMPT_SET": "已设置",
+        "CONFIG_PROMPT_NOT_SET": "未设置",
+        "CONFIG_FIELD_DUMMY": "Dummy API 模式",
+        "CONFIG_DUMMY_ON": "开启（仅拥有者）",
+        "CONFIG_DUMMY_OFF": "关闭（仅拥有者）",
+        "CONFIG_SELECT_MODEL_PLACEHOLDER": "选择你的默认模型",
+        "CONFIG_BTN_SET_PROMPT": "设置提示词",
+        "CONFIG_BTN_VIEW_PROMPT": "查看提示词",
+        "CONFIG_BTN_CLEAR_PROMPT": "清除提示词",
+        "CONFIG_BTN_DUMMY_ON": "Dummy：开启",
+        "CONFIG_BTN_DUMMY_OFF": "Dummy：关闭",
+        "CONFIG_MODEL_SET_OK": "✅ 默认模型已设置为 `{model}`。",
+        "CONFIG_NO_PROMPT": "目前没有设置提示词。",
+        "CONFIG_PROMPT_EMBED_TITLE": "📝 提示词",
+        "CONFIG_PROMPT_FIELD_PERSONAL": "个人",
+        "CONFIG_PROMPT_FIELD_DEFAULT": "默认",
+        "CONFIG_PROMPT_MODAL_TITLE": "设置个人提示词",
+        "CONFIG_PROMPT_MODAL_LABEL": "系统提示词",
+        "CONFIG_PROMPT_MODAL_PLACEHOLDER": "描述 PoeHub 应该如何回复...",
+        "CONFIG_PROMPT_APPEND_PLACEHOLDER": "目前提示词超过 {limit} 字符，新内容会附加在最后。",
+        "CONFIG_PROMPT_DEFAULT_TOO_LONG": "默认提示词过长，请粘贴想修改的部分。",
+        "CONFIG_PROMPT_UPDATED": "✅ 个人提示词已更新。",
+        "CONFIG_PROMPT_APPENDED": "✅ 个人提示词已更新（追加）。",
+        "CONFIG_PROMPT_MODAL_EMPTY": "❌ 请输入内容。",
+        "CONFIG_PROMPT_CLEARED": "✅ 个人提示词已清除。",
+        "CONFIG_PROMPT_DM_SENT": "📄 完整提示词已发送到你的私信 (DM)。",
+        "CONFIG_PROMPT_DM_BLOCKED": "⚠️ 无法发送 DM，请使用 !myprompt 获取完整内容。",
+        "CONFIG_DUMMY_DISABLED": "❌ 此版本未开放 Dummy API 模式。",
+        "CONFIG_DUMMY_STATUS": "🔧 Dummy API 模式目前为 **{status}**。",
+        "CONFIG_DUMMY_ENABLED_OK": "✅ Dummy API 模式已开启（离线回复）。",
+        "CONFIG_DUMMY_DISABLED_OK": "✅ Dummy API 模式已关闭。请用 `[p]poeapikey` 设置真实密钥。",
+        "MY_PROMPT_EMBED_TITLE": "📝 您的系统提示词",
+        "MY_PROMPT_FIELD_PERSONAL": "🔷 个人提示词",
+        "MY_PROMPT_FIELD_DEFAULT": "🔹 默认提示词",
+        "MY_PROMPT_FIELD_STATUS": "ℹ️ 状态",
+        "MY_PROMPT_STATUS_PERSONAL": "使用你的个人提示词",
+        "MY_PROMPT_STATUS_DEFAULT": "使用默认提示词",
+        "MY_PROMPT_ATTACHMENT_PERSONAL": "📄 个人提示词完整内容已附加于文件。",
+        "MY_PROMPT_ATTACHMENT_DEFAULT": "📄 默认提示词完整内容已附加于文件。",
+        "MY_PROMPT_ATTACHMENT_GENERIC": "📄 已附加完整提示词。",
+        "MY_PROMPT_DM_BODY": "📄 已附上完整提示词。",
+        "MY_PROMPT_NONE": "尚未设置提示词",
+        # Conversation UI
+        "CONV_TITLE": "💬 对话管理",
+        "CONV_DESC": "切换、删除对话，或清除对话记录。",
+        "CONV_FIELD_ACTIVE": "当前对话",
+        "CONV_FIELD_RECENT": "最近内容",
+        "CONV_SWITCH_PLACEHOLDER": "切换对话",
+        "CONV_DELETE_PLACEHOLDER": "删除对话",
+        "CONV_BTN_CLEAR_HISTORY": "清除记录",
+        "CONV_BTN_REFRESH": "刷新",
+        "CONV_BTN_NEW": "新对话",
+        "CONV_BTN_DELETE": "删除",
+        "CONV_DEFAULT_LABEL": "默认",
+        "CONV_OPTION_DESC": "消息: {count}",
+        "CONV_DELETED_OK": "✅ 已删除对话 **{title}**。",
+        "CONV_DELETE_FAILED": "❌ 无法删除 **{title}**。",
+        "CONV_HISTORY_CLEARED_OK": "✅ 已清除 **{title}** 的对话记录。",
+        "CONV_NO_ACTIVE": "⚠️ 找不到当前对话。",
+        "CONV_SYSTEM_NOT_INITIALIZED": "❌ 系统尚未初始化。",
+        "CONV_EMPTY": "*空*",
+        "CONV_NON_TEXT": "[非文字内容]",
+        # Home Menu
+        "HOME_TITLE": "🏠 PoeHub 首页",
+        "HOME_DESC": "欢迎！请选择下方功能。",
+        "HOME_BTN_SETTINGS": "设置",
+        "HOME_BTN_CONV": "对话管理",
+        # Help
+        "HELP_TITLE": "📖 PoeHub 说明",
+        "HELP_DESC": "常用指令与提示。",
+        "HELP_SECTION_CHAT": "对话",
+        "HELP_SECTION_MODELS": "模型",
+        "HELP_SECTION_CONV": "对话管理",
+        "HELP_SECTION_SETTINGS": "设置",
+        "HELP_LINE": "`{cmd}` — {desc}",
+        "HELP_LANG_HINT": "提示：使用 `{cmd}` 切换语言。",
     },
 }
 

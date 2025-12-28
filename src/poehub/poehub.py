@@ -28,6 +28,7 @@ from .i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, SUPPORTED_LANGS, tr
 from .prompt_utils import prompt_to_file
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
+from .ui.home_view import HomeMenuView
 from .ui.language_view import LanguageView
 from .ui.provider_view import ProviderConfigView
 
@@ -906,7 +907,21 @@ class PoeHub(red_commands.Cog):
         else:
             await ctx.send("✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`.")
 
-    @red_commands.command(name="poeconfig", aliases=["config", "menu"])
+    @red_commands.command(name="menu", aliases=["poehub", "home"])
+    async def poehub_menu(self, ctx: red_commands.Context):
+        """Open the unified PoeHub Home Menu."""
+        lang = await self._get_language(ctx.author.id)
+        view = HomeMenuView(self, ctx, lang)
+        
+        embed = discord.Embed(
+             title=tr(lang, "HOME_TITLE"),
+             description=tr(lang, "HOME_DESC"),
+             color=discord.Color.blue(),
+        )
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
+
+    @red_commands.command(name="poeconfig", aliases=["config"])
     async def open_config_menu(self, ctx: red_commands.Context):
         """Open the interactive configuration panel"""
         lang = await self._get_language(ctx.author.id)

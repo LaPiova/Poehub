@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
 
 import discord
 from redbot.core import commands as red_commands
@@ -13,7 +13,7 @@ from ..prompt_utils import (
     PROMPT_TEXTINPUT_MAX,
     send_prompt_files_dm,
 )
-from .common import CloseMenuButton
+from .common import BackButton, CloseMenuButton
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..poehub import PoeHub
@@ -30,6 +30,7 @@ class PoeConfigView(discord.ui.View):
         owner_mode: bool,
         dummy_state: bool,
         lang: str,
+        back_callback: Optional[Callable[[discord.Interaction], Awaitable[None]]] = None,
     ) -> None:
         super().__init__(timeout=180)
         self.cog = cog
@@ -37,6 +38,7 @@ class PoeConfigView(discord.ui.View):
         self.lang = lang
         self.message: Optional[discord.Message] = None
         self.owner_mode = owner_mode
+        self.back_callback = back_callback
         lang = self.lang
 
         if model_options:
@@ -47,6 +49,9 @@ class PoeConfigView(discord.ui.View):
         self.add_item(ClearPromptButton(cog, ctx, lang))
 
         self.add_item(CloseMenuButton(label=tr(lang, "CLOSE_MENU")))
+        
+        if back_callback:
+            self.add_item(BackButton(back_callback, lang))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.author.id:

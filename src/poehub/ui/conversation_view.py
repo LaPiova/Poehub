@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
 
 import discord
 from redbot.core import commands as red_commands
 
 from ..i18n import tr
-from .common import CloseMenuButton, preview_content
+from .common import BackButton, CloseMenuButton, preview_content
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..poehub import PoeHub
@@ -47,43 +47,50 @@ class SwitchConversationSelect(discord.ui.Select):
             await self.view.refresh_content(interaction)
 
 
-class DeleteConversationSelect(discord.ui.Select):
-    """Dropdown to delete a conversation."""
+class DeleteButton(discord.ui.Button):
+    """Button to delete the active conversation."""
 
-    def __init__(
-        self,
-        cog: "PoeHub",
-        ctx: red_commands.Context,
-        options: List[discord.SelectOption],
-        lang: str,
-    ) -> None:
+    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
         super().__init__(
-            placeholder=tr(lang, "CONV_DELETE_PLACEHOLDER"),
-            min_values=1,
-            max_values=1,
-            options=options,
-            row=1,
+            label=tr(lang, "CONV_BTN_DELETE"),
+            style=discord.ButtonStyle.danger,
+            emoji="🗑️",
+            row=2,
         )
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        conv_id = self.values[0]
-        conv = await self.cog._get_conversation(self.ctx.author.id, conv_id)
-        title = conv.get("title", conv_id) if conv else conv_id
+        if not self.cog.conversation_manager:
+            await interaction.response.send_message(
+                tr(self.lang, "CONV_SYSTEM_NOT_INITIALIZED"), ephemeral=True
+            )
+            return
 
-        success = await self.cog._delete_conversation(self.ctx.author.id, conv_id)
+        active_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
+        if active_id == "default":
+             await interaction.response.send_message(
+                tr(self.lang, "CONV_DELETE_FAILED", title="Default"),
+                ephemeral=True,
+            )
+             return
+
+        title = active_id # Fallback
+        conv = await self.cog._get_conversation(self.ctx.author.id, active_id)
+        if conv:
+             title = conv.get("title", active_id)
+
+        success = await self.cog._delete_conversation(self.ctx.author.id, active_id)
         if not success:
             await interaction.response.send_message(
                 tr(self.lang, "CONV_DELETE_FAILED", title=title),
                 ephemeral=True,
             )
             return
-
-        active_id = await self.cog._get_active_conversation_id(self.ctx.author.id)
-        if active_id == conv_id:
-            await self.cog._set_active_conversation(self.ctx.author.id, "default")
+        
+        # Reset to default
+        await self.cog._set_active_conversation(self.ctx.author.id, "default")
 
         await interaction.response.send_message(
             tr(self.lang, "CONV_DELETED_OK", title=title),
@@ -148,7 +155,7 @@ class NewConversationButton(discord.ui.Button):
             label=tr(lang, "CONV_BTN_NEW"),
             style=discord.ButtonStyle.success,
             emoji="➕",
-            row=2,
+            row=1,
         )
         self.cog = cog
         self.ctx = ctx
@@ -186,7 +193,7 @@ class RefreshButton(discord.ui.Button):
             label=tr(lang, "CONV_BTN_REFRESH"),
             style=discord.ButtonStyle.secondary,
             emoji="🔄",
-            row=2,
+            row=1,
         )
         self.lang = lang
 
@@ -196,14 +203,37 @@ class RefreshButton(discord.ui.Button):
             await self.view.refresh_content(interaction)
 
 
+from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
+
+import discord
+from redbot.core import commands as red_commands
+
+from ..i18n import tr
+from .common import BackButton, CloseMenuButton, preview_content
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..poehub import PoeHub
+
+# ... (SwitchConversationSelect, DeleteConversationSelect, ClearHistoryButton, NewConversationButton, RefreshButton classes omitted in replace, assuming they are above) 
+# Wait, replace_file_content replaces a contiguous block. I need to be careful with imports which are at the top.
+# I will do imports separately if they are far apart.
+# Imports are lines 7-13. ConversationMenuView starts line 199.
+
 class ConversationMenuView(discord.ui.View):
     """Interactive menu to switch, delete, and clear conversations."""
 
-    def __init__(self, cog: "PoeHub", ctx: red_commands.Context, lang: str) -> None:
+    def __init__(
+        self, 
+        cog: "PoeHub", 
+        ctx: red_commands.Context, 
+        lang: str,
+        back_callback: Optional[Callable[[discord.Interaction], Awaitable[None]]] = None,
+    ) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx
         self.lang = lang
+        self.back_callback = back_callback
         self.message: Optional[discord.Message] = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -280,22 +310,14 @@ class ConversationMenuView(discord.ui.View):
         options, active_id = await self.build_options()
         self.add_item(SwitchConversationSelect(self.cog, self.ctx, options, self.lang))
 
-        delete_options = [
-            discord.SelectOption(
-                label=opt.label,
-                value=opt.value,
-                description=opt.description,
-                emoji="🗑️",
-            )
-            for opt in options
-        ]
-        if delete_options:
-            self.add_item(DeleteConversationSelect(self.cog, self.ctx, delete_options, self.lang))
-
         self.add_item(NewConversationButton(self.cog, self.ctx, self.lang))
+        self.add_item(DeleteButton(self.cog, self.ctx, self.lang))
         self.add_item(ClearHistoryButton(self.cog, self.ctx, self.lang))
         self.add_item(RefreshButton(self.lang))
         self.add_item(CloseMenuButton(label=tr(self.lang, "CLOSE_MENU")))
+
+        if self.back_callback:
+            self.add_item(BackButton(self.back_callback, self.lang))
 
         conv = await self.cog._get_conversation(self.ctx.author.id, active_id)
         if not conv:
