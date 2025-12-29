@@ -25,10 +25,23 @@ class BillingService:
     def __init__(self, bot: Red, config: Config):
         self.bot = bot
         self.config = config
+        self.pricing_task: asyncio.Task | None = None
 
     async def start_pricing_loop(self):
         """Start the background pricing update loop."""
-        self.bot.loop.create_task(self._pricing_update_loop())
+        if self.pricing_task:
+            self.pricing_task.cancel()
+        self.pricing_task = self.bot.loop.create_task(self._pricing_update_loop())
+
+    async def stop_pricing_loop(self):
+        """Stop the background pricing update loop."""
+        if self.pricing_task:
+            self.pricing_task.cancel()
+            try:
+                await self.pricing_task
+            except asyncio.CancelledError:
+                pass
+            self.pricing_task = None
 
     async def _pricing_update_loop(self):
         """Background task to update pricing monthly (or daily for safety)."""
