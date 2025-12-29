@@ -121,6 +121,31 @@ class BaseLLMClient(abc.ABC):
     def get_cache_age(self) -> int:
         return int(time.time() - self._models_cache_time)
 
+    def format_image_message(self, text: str, image_urls: list[str]) -> list[dict[str, Any]]:
+        """Format a message with text and images for multimodal input.
+
+        Args:
+            text: The text content of the message
+            image_urls: List of image URLs to include
+
+        Returns:
+            A list of content parts compatible with OpenAI's multimodal format
+        """
+        content = []
+
+        # Add text part if present
+        if text:
+            content.append({"type": "text", "text": text})
+
+        # Add image parts
+        for url in image_urls:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": url}
+            })
+
+        return content
+
 
 class OpenAIProvider(BaseLLMClient):
     """Client for OpenAI and compatible APIs (Poe, DeepSeek, OpenRouter)."""
