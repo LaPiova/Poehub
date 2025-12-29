@@ -56,6 +56,7 @@ class ConversationStorageService:
         return {
             "id": conv_id,
             "created_at": time.time(),
+            "updated_at": time.time(),
             "messages": [],
             "title": title or f"Conversation {conv_id}",
         }
@@ -88,6 +89,8 @@ class ConversationStorageService:
         # Prune old messages to avoid context window issues
         if len(conversation["messages"]) > max_history:
             conversation["messages"] = conversation["messages"][-max_history:]
+
+        conversation["updated_at"] = time.time()
 
         return conversation
 

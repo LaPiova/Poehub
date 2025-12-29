@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 import discord
+from discord.ext import tasks
 from redbot.core import Config
 from redbot.core import commands as red_commands
 from redbot.core.bot import Red
@@ -162,8 +163,16 @@ class PoeHub(red_commands.Cog):
 
         # Start background tasks
         await self.billing.start_pricing_loop()
+        self._auto_clear_loop.start()
         # Initialize client via service
         await self.chat_service.initialize_client()
+
+    def cog_unload(self):
+        """Clean up when cog is unloaded."""
+        if self._auto_clear_loop.is_running():
+            self._auto_clear_loop.cancel()
+        if self.billing:
+            asyncio.create_task(self.billing.stop_pricing_loop())
 
     async def _init_client(self) -> None:
         """Initialize the LLM client based on configuration."""
@@ -347,6 +356,62 @@ class PoeHub(red_commands.Cog):
         if self.context_service:
             return await self.context_service.get_user_language(user_id)
         return LANG_EN
+
+    # --- Auto-Clear Loop ---
+
+    @tasks.loop(minutes=5)
+    async def _auto_clear_loop(self):
+        """Check for inactive conversations and clear history."""
+        try:
+            now = time.time()
+            limit = 2 * 60 * 60  # 2 hours in seconds
+
+            all_users = await self.config.all_users()
+            for user_id, user_data in all_users.items():
+                conversations = user_data.get("conversations", {})
+                if not conversations:
+                    continue
+
+                changed = False
+                for conv_id, enc_data in conversations.items():
+                    # Decrypt to check timestamp
+                    data = self.conversation_manager.process_conversation_data(enc_data)
+                    if not data:
+                        continue
+
+                    messages = data.get("messages", [])
+                    if not messages:
+                        continue
+
+                    updated_at = data.get("updated_at")
+                    # If updated_at is missing, use created_at, or assume active to be safe
+                    if not updated_at:
+                        updated_at = data.get("created_at", now)
+
+                    if now - updated_at > limit:
+                        # Clear messages
+                        log.info(f"Auto-clearing inactive conversation {conv_id} for user {user_id}")
+                        self.conversation_manager.clear_messages(data)
+
+                        # Re-encrypt
+                        conversations[conv_id] = self.conversation_manager.prepare_for_storage(data)
+                        changed = True
+
+                        # Clear memory cache
+                        # We need access to chat_service's memory. Ideally chat_service exposes this.
+                        # Accessing private member for now as per previous pattern
+                        if self.chat_service:
+                            await self.chat_service._clear_conversation_memory(user_id, conv_id)
+
+                if changed:
+                    await self.config.user_from_id(user_id).conversations.set(conversations)
+
+        except Exception:
+            log.exception("Error in auto-clear loop")
+
+    @_auto_clear_loop.before_loop
+    async def _before_auto_clear(self):
+        await self.bot.wait_until_ready()
 
     # --- Commands ---
 

@@ -253,7 +253,7 @@ async def test_on_message_dm_not_mentioned(cog):
 
     message = AsyncMock()
     message.author.bot = False
-    message.channel.__class__ = discord.DMChannel
+    message.channel = MagicMock(spec=discord.DMChannel)
     message.mentions = []
     message.content = "hello"
 
