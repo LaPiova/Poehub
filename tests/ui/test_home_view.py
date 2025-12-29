@@ -73,13 +73,15 @@ class TestHomeView:
 
             interaction = MagicMock()
             interaction.response = MagicMock()
-            interaction.response.edit_message = async_return()
+            interaction.edit_original_response = async_return()
+            interaction.response.defer = async_return()
 
             await btn.callback(interaction)
 
             # Check initialization
+            # Check initialization
             MockConfigView.assert_called()
-            interaction.response.edit_message.assert_called()
+            interaction.edit_original_response.assert_called()
 
             # Test back callback logic
             args = MockConfigView.call_args[1]
@@ -107,13 +109,14 @@ class TestHomeView:
 
             interaction = MagicMock()
             interaction.response = MagicMock()
-            interaction.response.edit_message = async_return()
+            interaction.edit_original_response = async_return()
+            interaction.response.defer = async_return()
 
             await btn.callback(interaction)
 
             MockConvView.assert_called()
             mock_conv_view.refresh_content.assert_called()
-            interaction.response.edit_message.assert_called()
+            interaction.edit_original_response.assert_called()
 
             # Back callback check
             args = MockConvView.call_args[1]

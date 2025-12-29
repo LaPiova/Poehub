@@ -143,8 +143,14 @@ class ChatService:
         user = message.author
 
         # Get preferences & Context
-        user_model = await self.config.user(user).model()
         active_conv_id = await self.context.get_active_conversation_id(user.id)
+
+        # Load conversation to check for specific model
+        conv_data = await self._get_conversation(user.id, active_conv_id)
+        if conv_data and conv_data.get("model"):
+            user_model = conv_data["model"]
+        else:
+            user_model = await self.config.user(user).model()
 
         # Load history
         history = await self._get_conversation_messages(user.id, active_conv_id)

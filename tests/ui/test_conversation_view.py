@@ -42,7 +42,10 @@ def mock_cog():
     user_group = MagicMock()
     # conversations() returns dict of id -> data
     user_group.conversations = AsyncMock(return_value={"c1": {"messages": []}, "c2": {"messages": []}})
+    user_group.model = AsyncMock(return_value="gpt-4")
     cog.config.user.return_value = user_group
+
+    cog._build_model_select_options = AsyncMock(return_value=[])
 
     return cog
 

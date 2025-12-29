@@ -162,7 +162,7 @@ class NewConversationButton(discord.ui.Button):
             label=tr(lang, "CONV_BTN_NEW"),
             style=discord.ButtonStyle.success,
             emoji="➕",
-            row=1,
+            row=2,
         )
         self.cog = cog
         self.ctx = ctx
@@ -200,7 +200,7 @@ class RefreshButton(discord.ui.Button):
             label=tr(lang, "CONV_BTN_REFRESH"),
             style=discord.ButtonStyle.secondary,
             emoji="🔄",
-            row=1,
+            row=2,
         )
         self.lang = lang
 
@@ -221,6 +221,135 @@ if TYPE_CHECKING:  # pragma: no cover
 # Wait, replace_file_content replaces a contiguous block. I need to be careful with imports which are at the top.
 # I will do imports separately if they are far apart.
 # Imports are lines 7-13. ConversationMenuView starts line 199.
+
+
+
+class ConversationModelSelect(discord.ui.Select):
+    """Dropdown to select model for the current conversation."""
+
+    def __init__(
+        self,
+        cog: PoeHub,
+        ctx: red_commands.Context,
+        options: list[discord.SelectOption],
+        lang: str,
+        active_model: str | None,
+    ) -> None:
+        # Mark active model
+        if active_model:
+            for opt in options:
+                opt.default = (opt.value == active_model)
+
+        super().__init__(
+            placeholder=tr(lang, "CONFIG_SELECT_MODEL_PLACEHOLDER", default="Select Model..."),
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=1,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        model_choice = self.values[0]
+        # Get active conv
+        active_id = await self.cog.context_service.get_active_conversation_id(self.ctx.author.id)
+        conv = await self.cog._get_or_create_conversation(self.ctx.author.id, active_id)
+
+        # Update model
+        conv["model"] = model_choice
+        await self.cog._save_conversation(self.ctx.author.id, active_id, conv)
+
+        await interaction.response.send_message(
+            tr(self.lang, "CONFIG_MODEL_SET_OK", model=model_choice),
+            ephemeral=True,
+        )
+
+        if isinstance(self.view, ConversationMenuView):
+            await self.view.refresh_content(interaction, update_response=True)
+
+
+class ConversationModelSearchModal(discord.ui.Modal):
+    """Modal to search for models in conversation view."""
+
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
+        # Tries to use translations but falls back safely
+        title = tr(lang, "CONFIG_SEARCH_MODAL_TITLE")
+        if title.startswith("KeyError"):
+            title = "Search Models"
+
+        super().__init__(title=title)
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+        label = tr(lang, "CONFIG_SEARCH_MODAL_LABEL")
+        if label.startswith("KeyError"):
+            label = "Model Name"
+
+        placeholder = tr(lang, "CONFIG_SEARCH_MODAL_PLACEHOLDER")
+        if placeholder.startswith("KeyError"):
+            placeholder = "e.g. claude"
+
+        self.query = discord.ui.TextInput(
+            label=label,
+            style=discord.TextStyle.short,
+            placeholder=placeholder,
+            required=True,
+            max_length=50,
+        )
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        query = self.query.value.strip()
+        new_options = await self.cog._build_model_select_options(query)
+
+        if not new_options:
+            msg = tr(self.lang, "CONFIG_SEARCH_NO_RESULTS", query=query)
+            if msg.startswith("KeyError"):
+                msg = f"No models found matching '{query}'"
+            await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        # Update the view
+        if hasattr(self, "origin_view") and self.origin_view:
+            view = self.origin_view
+            for child in view.children:
+                if isinstance(child, ConversationModelSelect):
+                    child.options = new_options
+                    child.placeholder = f"Found {len(new_options)} matches for '{query}'"
+                    break
+
+            await interaction.response.edit_message(view=view)
+        else:
+             await interaction.response.send_message(
+                "❌ Error: Lost context.", ephemeral=True
+            )
+
+
+class ConversationModelSearchButton(discord.ui.Button):
+    """Button to search models in conversation view."""
+
+    def __init__(self, cog: PoeHub, ctx: red_commands.Context, lang: str) -> None:
+        label = tr(lang, "CONFIG_BTN_SEARCH_MODEL")
+        if label.startswith("KeyError"):
+            label = "Search Models"
+
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.secondary,
+            emoji="🔍",
+            row=2,
+        )
+        self.cog = cog
+        self.ctx = ctx
+        self.lang = lang
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        modal = ConversationModelSearchModal(self.cog, self.ctx, self.lang)
+        modal.origin_view = self.view
+        await interaction.response.send_modal(modal)
 
 
 class ConversationMenuView(discord.ui.View):
@@ -314,9 +443,19 @@ class ConversationMenuView(discord.ui.View):
         options, active_id = await self.build_options()
         self.add_item(SwitchConversationSelect(self.cog, self.ctx, options, self.lang))
 
+        # Model Selection
+        # Resolve active model for conversation
+        conv_temp = await self.cog._get_conversation(self.ctx.author.id, active_id)
+        current_model = conv_temp.get("model") if conv_temp else None
+
+        # Build default options (top models)
+        model_ops = await self.cog._build_model_select_options()
+        self.add_item(ConversationModelSelect(self.cog, self.ctx, model_ops, self.lang, current_model))
+
         self.add_item(NewConversationButton(self.cog, self.ctx, self.lang))
         self.add_item(DeleteButton(self.cog, self.ctx, self.lang))
         self.add_item(ClearHistoryButton(self.cog, self.ctx, self.lang))
+        self.add_item(ConversationModelSearchButton(self.cog, self.ctx, self.lang))
         self.add_item(RefreshButton(self.lang))
         self.add_item(CloseMenuButton(label=tr(self.lang, "CLOSE_MENU")))
 
@@ -336,10 +475,18 @@ class ConversationMenuView(discord.ui.View):
             description=tr(self.lang, "CONV_DESC"),
             color=discord.Color.gold(),
         )
+        if not current_model:
+            current_model = await self.cog.config.user(self.ctx.author).model()
+
         embed.add_field(
             name=tr(self.lang, "CONV_FIELD_ACTIVE"),
             value=f"**{title}**\nID: `{active_id}`\n{tr(self.lang, 'CONV_OPTION_DESC', count=msg_count)}",
-            inline=False,
+            inline=True,
+        )
+        embed.add_field(
+            name="Model",
+            value=f"`{current_model}`",
+            inline=True,
         )
 
         messages = conv.get("messages") or []

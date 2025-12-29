@@ -28,6 +28,9 @@ class SettingsButton(discord.ui.Button):
         self.lang = lang
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        # Defer to prevent timeout during model fetching
+        await interaction.response.defer()
+
         # Check permissions/ownership for config if needed?
         # Standard users can see settings (model/prompt), owner sees more.
         # Logic from menu command:
@@ -63,7 +66,7 @@ class SettingsButton(discord.ui.Button):
         )
 
         # We want to replace the current message
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
         view.message = interaction.message
 
 
@@ -88,6 +91,9 @@ class ConversationsButton(discord.ui.Button):
             )
             return
 
+        # Defer immediately because refresh_content can be slow (API calls)
+        await interaction.response.defer()
+
         async def go_home(inter: discord.Interaction):
             view = HomeMenuView(self.cog, self.ctx, self.lang)
             embed = discord.Embed(
@@ -103,7 +109,7 @@ class ConversationsButton(discord.ui.Button):
         )
         embed = await view.refresh_content(None)
 
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
         view.message = interaction.message
 
 
