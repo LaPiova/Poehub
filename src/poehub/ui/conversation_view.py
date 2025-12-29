@@ -135,6 +135,12 @@ class ClearHistoryButton(discord.ui.Button):
         await self.cog._save_conversation(
             self.ctx.author.id, active_conv_id, updated_conv
         )
+
+        # Clear the in-memory cache using ThreadSafeMemory.clear()
+        await self.cog.chat_service._clear_conversation_memory(
+            self.ctx.author.id, active_conv_id
+        )
+
         await interaction.response.send_message(
             tr(
                 self.lang,

@@ -27,6 +27,10 @@ def mock_cog():
     cog.conversation_manager.process_conversation_data = Mock(side_effect=lambda x: x)
     cog.conversation_manager.clear_messages = Mock(side_effect=lambda x: {**x, "messages": []})
 
+    # Chat Service
+    cog.chat_service = MagicMock()
+    cog.chat_service._clear_conversation_memory = AsyncMock()
+
     # Helpers
     cog._get_conversation = AsyncMock(return_value={"messages": [{"role": "user", "content": "hi"}]})
     cog._get_or_create_conversation = AsyncMock(return_value={"messages": []})
@@ -131,6 +135,7 @@ class TestConversationView:
 
             mock_cog.conversation_manager.clear_messages.assert_called()
             mock_cog._save_conversation.assert_called()
+            mock_cog.chat_service._clear_conversation_memory.assert_awaited()
             view.refresh_content.assert_called()
 
     async def test_new_conversation_button(self, mock_cog, mock_ctx):

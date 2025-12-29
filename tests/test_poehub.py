@@ -216,6 +216,7 @@ async def test_clear_history(cog, mock_ctx, mock_config):
     cog.conversation_manager.process_conversation_data = MagicMock(return_value={"id": "conv1", "encrypted": "data"})
     cog.conversation_manager.clear_messages = MagicMock(return_value={"id": "conv1", "messages": []})
     cog.conversation_manager.prepare_for_storage = MagicMock(return_value={"encrypted": "cleared"})
+    cog.chat_service._clear_conversation_memory = AsyncMock()
 
     # Mock getting conversation
     conf_inst = mock_config.get_conf.return_value
@@ -225,7 +226,9 @@ async def test_clear_history(cog, mock_ctx, mock_config):
 
     cog.conversation_manager.clear_messages.assert_called()
     conf_inst.user_from_id.return_value.conversations.set.assert_called()
+    cog.chat_service._clear_conversation_memory.assert_awaited_once_with(mock_ctx.author.id, "conv1")
     mock_ctx.send.assert_called()
+
 
 # ==== Helper Methods Tests ====
 

@@ -476,6 +476,16 @@ class ChatService:
             self._memories[key] = ThreadSafeMemory(messages)
         return self._memories[key]
 
+    async def _clear_conversation_memory(self, user_id: int, conv_id: str) -> None:
+        """Clear the in-memory conversation messages using ThreadSafeMemory.clear().
+        This should be called when conversation history is cleared to ensure
+        the cached memory is also cleared.
+        """
+        memory = await self._get_memory(user_id, conv_id)
+        await memory.clear()
+
+
+
     async def _add_message_to_conversation(
         self, user_id: int, conv_id: str, role: str, content: Any
     ):
