@@ -750,6 +750,9 @@ class PoeHub(red_commands.Cog):
         updated_conv = self.conversation_manager.clear_messages(conv)
         await self._save_conversation(ctx.author.id, active_conv_id, updated_conv)
 
+        # Clear the in-memory cache using ThreadSafeMemory.clear()
+        await self.chat_service._clear_conversation_memory(ctx.author.id, active_conv_id)
+
         await ctx.send(
             f"✅ Conversation history cleared for **{updated_conv.get('title', active_conv_id)}**."
         )
@@ -780,6 +783,48 @@ class PoeHub(red_commands.Cog):
             await self.config.user(ctx.author).active_conversation.set("default")
 
             await ctx.send("✅ All conversations have been deleted.")
+        except TimeoutError:
+            await ctx.send("❌ Confirmation timeout.")
+
+    @red_commands.command(name="clear_all_histories", hidden=True)
+    @red_commands.is_owner()
+    async def clear_all_histories(self, ctx: red_commands.Context):
+        """[OWNER ONLY] Clear conversation history for ALL users (temporary maintenance command)"""
+        confirm_msg = await ctx.send(
+            "⚠️ **WARNING**: This will clear ALL conversation history for EVERY user.\n"
+            "This cannot be undone. React with ✅ to confirm."
+        )
+        await confirm_msg.add_reaction("✅")
+
+        def check(reaction, user):
+            return (
+                user == ctx.author
+                and str(reaction.emoji) == "✅"
+                and reaction.message.id == confirm_msg.id
+            )
+
+        try:
+            await self.bot.wait_for("reaction_add", timeout=30.0, check=check)
+
+            # Get all users
+            all_users = await self.config.all_users()
+            cleared_count = 0
+
+            for user_id in all_users:
+                # Clear conversations in storage
+                await self.config.user_from_id(user_id).conversations.set({})
+                # Reset active conversation
+                await self.config.user_from_id(user_id).active_conversation.set("default")
+                cleared_count += 1
+
+            # Clear all in-memory caches
+            if self.chat_service:
+                self.chat_service._memories.clear()
+
+            await ctx.send(
+                f"✅ Successfully cleared conversation history for {cleared_count} users.\n"
+                f"In-memory caches also cleared."
+            )
         except TimeoutError:
             await ctx.send("❌ Confirmation timeout.")
 
