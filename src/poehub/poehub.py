@@ -13,9 +13,11 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime
 from typing import Any
 
 import discord
+from discord.ext import tasks
 from redbot.core import Config
 from redbot.core import commands as red_commands
 from redbot.core.bot import Red
@@ -34,6 +36,7 @@ from .ui.conversation_view import ConversationMenuView
 from .ui.home_view import HomeMenuView
 from .ui.language_view import LanguageView
 from .ui.provider_view import ProviderConfigView
+from .ui.reminder_view import ReminderView
 from .utils.prompts import prompt_to_file
 
 
@@ -101,6 +104,7 @@ class PoeHub(red_commands.Cog):
             "monthly_limit_points": 250000,  # Int (Points), None = infinite
             "current_spend_points": 0.0,  # Float/Int (Points)
             "last_reset_month": None,  # Str "YYYY-MM"
+            "reminders": [],  # List[Dict] {timestamp, channel_id, message, mentions, author_id, created_at}
         }
 
         default_user = {
@@ -162,8 +166,19 @@ class PoeHub(red_commands.Cog):
 
         # Start background tasks
         await self.billing.start_pricing_loop()
+        self._auto_clear_loop.start()
+        self._reminder_loop.start()
         # Initialize client via service
         await self.chat_service.initialize_client()
+
+    def cog_unload(self):
+        """Clean up when cog is unloaded."""
+        if self._auto_clear_loop.is_running():
+            self._auto_clear_loop.cancel()
+        if self._reminder_loop.is_running():
+            self._reminder_loop.cancel()
+        if self.billing:
+            asyncio.create_task(self.billing.stop_pricing_loop())
 
     async def _init_client(self) -> None:
         """Initialize the LLM client based on configuration."""
@@ -347,6 +362,126 @@ class PoeHub(red_commands.Cog):
         if self.context_service:
             return await self.context_service.get_user_language(user_id)
         return LANG_EN
+
+    # --- Auto-Clear Loop ---
+
+    @tasks.loop(minutes=5)
+    async def _auto_clear_loop(self):
+        """Check for inactive conversations and clear history."""
+        try:
+            now = time.time()
+            limit = 2 * 60 * 60  # 2 hours in seconds
+
+            all_users = await self.config.all_users()
+            for user_id, user_data in all_users.items():
+                conversations = user_data.get("conversations", {})
+                if not conversations:
+                    continue
+
+                changed = False
+                for conv_id, enc_data in conversations.items():
+                    # Decrypt to check timestamp
+                    data = self.conversation_manager.process_conversation_data(enc_data)
+                    if not data:
+                        continue
+
+                    messages = data.get("messages", [])
+                    if not messages:
+                        continue
+
+                    updated_at = data.get("updated_at")
+                    # If updated_at is missing, use created_at, or assume active to be safe
+                    if not updated_at:
+                        updated_at = data.get("created_at", now)
+
+                    if now - updated_at > limit:
+                        # Clear messages
+                        log.info(f"Auto-clearing inactive conversation {conv_id} for user {user_id}")
+                        self.conversation_manager.clear_messages(data)
+
+                        # Re-encrypt
+                        conversations[conv_id] = self.conversation_manager.prepare_for_storage(data)
+                        changed = True
+
+                        # Clear memory cache
+                        # We need access to chat_service's memory. Ideally chat_service exposes this.
+                        # Accessing private member for now as per previous pattern
+                        if self.chat_service:
+                            await self.chat_service._clear_conversation_memory(user_id, conv_id)
+
+                if changed:
+                    await self.config.user_from_id(user_id).conversations.set(conversations)
+
+        except Exception:
+            log.exception("Error in auto-clear loop")
+
+    @_auto_clear_loop.before_loop
+    async def _before_auto_clear(self):
+        await self.bot.wait_until_ready()
+
+    # --- Reminder Loop ---
+
+    @tasks.loop(seconds=60)
+    async def _reminder_loop(self):
+        """Check for pending reminders."""
+        try:
+            now_ts = datetime.utcnow().timestamp()
+            all_guilds = await self.config.all_guilds()
+
+            for guild_id, guild_data in all_guilds.items():
+                reminders = guild_data.get("reminders", [])
+                if not reminders:
+                    continue
+
+                remaining_reminders = []
+                changed = False
+
+                for r in reminders:
+                    trigger_ts = r.get("timestamp", 0)
+                    if trigger_ts <= now_ts:
+                        # Trigger reminder
+                        channel_id = r.get("channel_id")
+                        channel = self.bot.get_channel(channel_id)
+                        if channel:
+                            mentions = []
+                            for m_id in r.get("mentions", []):
+                                # Try to get user or role
+                                user = channel.guild.get_member(m_id)
+                                if user:
+                                    mentions.append(user.mention)
+                                    continue
+                                role = channel.guild.get_role(m_id)
+                                if role:
+                                    mentions.append(role.mention)
+
+                            mention_str = " ".join(mentions)
+                            embed = discord.Embed(
+                                title="🔔 Reminder",
+                                description=r.get("message", "No content"),
+                                color=discord.Color.gold()
+                            )
+                            embed.set_footer(text=f"Scheduled by <@{r.get('author_id')}>")
+
+                            try:
+                                await channel.send(content=f"{mention_str}", embed=embed)
+                            except discord.Forbidden:
+                                log.warning(f"Missing permissions to send reminder in channel {channel_id}")
+                            except Exception as e:
+                                log.error(f"Error sending reminder: {e}")
+
+                        changed = True
+                    else:
+                        remaining_reminders.append(r)
+
+                if changed:
+                    await self.config.guild_from_id(guild_id).reminders.set(remaining_reminders)
+
+        except Exception:
+            log.exception("Error in reminder loop")
+
+    @_reminder_loop.before_loop
+    async def _before_reminder_loop(self):
+        await self.bot.wait_until_ready()
 
     # --- Commands ---
 
@@ -550,6 +685,41 @@ class PoeHub(red_commands.Cog):
         )
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
+
+    @red_commands.command(name="reminder")
+    @red_commands.guild_only()
+    async def reminder_command(self, ctx: red_commands.Context):
+        """Set a scheduled reminder with mentions."""
+        async def confirm_callback(data):
+            async with self.config.guild(ctx.guild).reminders() as reminders:
+                import time
+                data["created_at"] = time.time()
+                reminders.append(data)
+
+        async def delete_callback(value):
+            async with self.config.guild(ctx.guild).reminders() as reminders:
+                # Value is "created_at_timestamp"
+                # Find mismatching reminder to remove
+                # We iterate and find key match
+                to_remove = None
+                for r in reminders:
+                    k = f"{r.get('created_at')}_{r.get('timestamp')}"
+                    if k == value:
+                        to_remove = r
+                        break
+
+                if to_remove:
+                    reminders.remove(to_remove)
+                    return True
+                return False
+
+        # Fetch existing reminders for this user
+        all_reminders = await self.config.guild(ctx.guild).reminders()
+        user_reminders = [r for r in all_reminders if r.get("author_id") == ctx.author.id]
+
+        view = ReminderView(ctx, confirm_callback, user_reminders, delete_callback)
+        embed = view.build_embed()
+        view.message = await ctx.send(embed=embed, view=view)
 
     @red_commands.command(name="poeconfig", aliases=["config"])
     async def open_config_menu(self, ctx: red_commands.Context):

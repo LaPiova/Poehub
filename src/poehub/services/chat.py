@@ -526,6 +526,7 @@ class ChatService:
 
         conv = await self._get_or_create_conversation(user_id, conv_id)
         conv["messages"] = all_messages
+        conv["updated_at"] = time.time()
         await self._save_conversation(user_id, conv_id, conv)
 
     async def _get_conversation_messages(

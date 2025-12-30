@@ -1,6 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
-import discord
 import pytest
 
 # Mock tr before import
@@ -19,10 +18,10 @@ with patch("poehub.core.i18n.tr", side_effect=lambda lang, key: key):
 def mock_cog():
     cog = MagicMock()
     # Mock bot.guilds
-    guild1 = MagicMock(spec=discord.Guild)
+    guild1 = MagicMock()
     guild1.name = "Alpha"
     guild1.id = 101
-    guild2 = MagicMock(spec=discord.Guild)
+    guild2 = MagicMock()
     guild2.name = "Beta"
     guild2.id = 102
 
