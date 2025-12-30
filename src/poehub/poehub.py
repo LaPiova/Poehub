@@ -336,33 +336,7 @@ class PoeHub(red_commands.Cog):
 
         return conv
 
-    async def _add_message_to_conversation(
-        self,
-        user_id: int,
-        conv_id: str,
-        role: str,
-        content: str | list[dict[str, Any]],
-    ) -> None:
-        """Add a message to a conversation."""
-        if not self.conversation_manager:
-            return
 
-        conv = await self._get_or_create_conversation(user_id, conv_id)
-
-        # Update using manager logic
-        updated_conv = self.conversation_manager.add_message(conv, role, content)
-
-        await self._save_conversation(user_id, conv_id, updated_conv)
-
-    async def _get_conversation_messages(
-        self, user_id: int, conv_id: str
-    ) -> list[dict[str, str]]:
-        """Get messages for API call"""
-        if not self.conversation_manager:
-            return []
-
-        conv = await self._get_conversation(user_id, conv_id)
-        return self.conversation_manager.get_api_messages(conv)
 
     async def _get_language(self, user_id: int) -> str:
         """Get the user's preferred language."""

@@ -32,9 +32,16 @@ def mock_cog():
     # When mocking async generator method:
     cog.summarizer.summarize_messages = summary_gen
 
+    # Channel config
+    channel_group = MagicMock()
+    channel_group.conversations = AsyncMock(return_value={})
+    channel_group.conversations.set = AsyncMock()
+    cog.config.channel.return_value = channel_group
+
     # Chat Service
     cog.chat_service = MagicMock()
     cog.chat_service.send_split_message = AsyncMock()
+    cog.chat_service.add_message_to_conversation = AsyncMock()
 
     return cog
 

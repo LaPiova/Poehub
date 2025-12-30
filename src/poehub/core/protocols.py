@@ -163,6 +163,14 @@ class IChatService(Protocol):
         """Send a long message to Discord, splitting if necessary."""
         ...
 
+    async def add_message_to_conversation(
+        self, scope_group: Any, conv_id: str, unique_key: str, role: str, content: Any
+    ) -> None: ...
+
+    async def get_conversation_messages(
+        self, scope_group: Any, conv_id: str, unique_key: str
+    ) -> list[dict[str, str]]: ...
+
 
 @runtime_checkable
 class IContextService(Protocol):

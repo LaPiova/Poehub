@@ -16,9 +16,17 @@ class TestSummaryView:
         cog.chat_service = Mock()
         cog.chat_service.stream_response = AsyncMock()
         cog.chat_service.send_split_message = AsyncMock()
+        cog.chat_service.add_message_to_conversation = AsyncMock()
         cog.summarizer = Mock()
         cog.summarizer.summarize_messages = AsyncMock()
         cog.config = Mock()
+
+        # Mock channel config
+        channel_group = Mock()
+        channel_group.conversations = AsyncMock(return_value={})
+        channel_group.conversations.set = AsyncMock()
+        cog.config.channel.return_value = channel_group
+
         cog.bot = Mock()
         return cog
 

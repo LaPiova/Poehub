@@ -205,7 +205,53 @@ class StartSummaryButton(discord.ui.Button):
             thread = await initial_msg.create_thread(
                 name=f"Summary: Last {hours}h", auto_archive_duration=60
             )
+            import asyncio
+            await asyncio.sleep(0.5) # Propagate thread
+
             target = thread
+
+            # --- Thread History Initialization ---
+            # Use ChatService to initialize thread context
+            if self.cog.chat_service:
+                # 1. Determine Scope
+                scope_group = self.cog.config.channel(target)
+                conv_id = "default"
+                unique_key = f"channel:{target.id}:{conv_id}"
+                log.info(f"SummaryView initializing thread history: key={unique_key}, target_id={target.id}")
+
+                # 2. Init Conversation with Model
+                # Reuse the model we used for summary
+                conv_data = {"id": conv_id, "messages": [], "model": user_model}
+
+                # We need to access conversation manager via chat service or cog
+                # But ChatService methods usually handle get_or_create.
+                # Let's verify if we can set the model via ChatService?
+                # Currently ChatService.add_message doesn't set model explicitly if not exists.
+                # So we manually init via conversation manager first (like thread_model command)
+
+                conversations = await scope_group.conversations()
+                if conv_id not in conversations:
+                    log.info(f"Creating new conversation entry for {unique_key}")
+                    # Prepare initial data
+                    if self.cog.conversation_manager:
+                         conversations[conv_id] = self.cog.conversation_manager.prepare_for_storage(conv_data)
+                    else:
+                         # Fallback if manager not explicit
+                         conversations[conv_id] = conv_data
+                    await scope_group.conversations.set(conversations)
+
+                # 3. Add Trigger Message (User Request)
+                trigger_text = f"Summarize messages from last {hours} hours."
+                await self.cog.chat_service.add_message_to_conversation(
+                    scope_group, conv_id, unique_key, "user", trigger_text
+                )
+
+                # 4. Add Result Message (Assistant Response)
+                await self.cog.chat_service.add_message_to_conversation(
+                    scope_group, conv_id, unique_key, "assistant", final_text
+                )
+                log.info(f"Saved summary messages to {unique_key}")
+
         except discord.Forbidden:
             target = channel
 

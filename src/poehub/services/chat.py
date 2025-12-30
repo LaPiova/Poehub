@@ -203,7 +203,7 @@ class ChatService:
                 user_model = await self.config.user(user).model()
 
         # Load history from the determined scope
-        history = await self._get_conversation_messages(scope_group, conv_id, unique_key)
+        history = await self.get_conversation_messages(scope_group, conv_id, unique_key)
         log.info(f"Loaded history for {unique_key}: {len(history)} msgs")
 
         # --- Quote / Reply Context ---
@@ -224,7 +224,7 @@ class ChatService:
             formatted_content = full_text_input
 
         # Save to history (User or Thread scope)
-        await self._add_message_to_conversation(
+        await self.add_message_to_conversation(
             scope_group, conv_id, unique_key, "user", formatted_content
         )
 
@@ -347,7 +347,7 @@ class ChatService:
 
                 if save_to_conv:
                     scope_group, conv_id, unique_key = save_to_conv
-                    await self._add_message_to_conversation(
+                    await self.add_message_to_conversation(
                         scope_group, conv_id, unique_key, "assistant", accumulated_content
                     )
             else:
@@ -524,7 +524,7 @@ class ChatService:
         if unique_key in self._memories:
             await self._memories[unique_key].clear()
 
-    async def _add_message_to_conversation(
+    async def add_message_to_conversation(
         self, scope_group: Any, conv_id: str, unique_key: str, role: str, content: Any
     ):
         """Add message to conversation using ThreadSafeMemory."""
@@ -549,7 +549,7 @@ class ChatService:
         conv["updated_at"] = time.time()
         await self._save_conversation(scope_group, conv_id, conv)
 
-    async def _get_conversation_messages(
+    async def get_conversation_messages(
         self, scope_group: Any, conv_id: str, unique_key: str
     ) -> list[dict[str, str]]:
         """Get messages formatted for API from memory."""

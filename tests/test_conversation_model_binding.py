@@ -18,6 +18,7 @@ class TestConversationModelBinding:
 
         # Setup basic config mocks
         config.user.return_value.model = AsyncMock(return_value="default-gpt")
+        config.channel.return_value.conversations = AsyncMock(return_value={})
 
         # Setup service
         service = ChatService(bot, config, billing, context, conv_manager)
@@ -28,10 +29,10 @@ class TestConversationModelBinding:
         billing.check_budget = AsyncMock(return_value=True)
 
         # Mock internal helpers
-        service._get_conversation_messages = AsyncMock(return_value=[])
+        service.get_conversation_messages = AsyncMock(return_value=[])
         service._resolve_quote_context = AsyncMock(return_value="")
         service._extract_image_urls = Mock(return_value=[])
-        service._add_message_to_conversation = AsyncMock()
+        service.add_message_to_conversation = AsyncMock()
         service._determine_response_target = AsyncMock(return_value=Mock())
         service.stream_response = AsyncMock()
 
