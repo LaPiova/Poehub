@@ -190,6 +190,7 @@ class ISummarizerService(Protocol):
         user_id: int,
         model: str,
         billing_guild: Any = None,
+        language: str | None = None,
     ) -> AsyncIterator[str]:
         """Generate a summary, yielding progress updates and final result."""
         ...

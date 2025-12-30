@@ -13,8 +13,12 @@ def mock_cog():
     cog = MagicMock()
     cog.config.user = MagicMock()
     mock_user_group = MagicMock()
-    mock_user_group.model = AsyncMock(return_value="gpt-4o")
+    mock_user_group.model = AsyncMock(return_value="gpt-4")
     cog.config.user.return_value = mock_user_group
+
+    # Mock context service for language
+    cog.context_service = MagicMock()
+    cog.context_service.get_user_language = AsyncMock(return_value="en")
 
     cog.config.channel = MagicMock()
     cog.chat_service = AsyncMock(spec=ChatService)

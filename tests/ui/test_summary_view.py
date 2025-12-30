@@ -30,7 +30,9 @@ def mock_cog():
         yield "RESULT: The summary content."
 
     # When mocking async generator method:
-    cog.summarizer.summarize_messages = summary_gen
+    # Use MagicMock (created by default) and set side_effect to the generator function
+    # This allows us to iterate over it (via side_effect) AND check call_args on the mock
+    cog.summarizer.summarize_messages.side_effect = summary_gen
 
     # Channel config
     channel_group = MagicMock()
@@ -41,6 +43,11 @@ def mock_cog():
     # Chat Service
     cog.chat_service = MagicMock()
     cog.chat_service.send_split_message = AsyncMock()
+
+    # Context Service
+    cog.context_service = MagicMock()
+    cog.context_service.get_user_language = AsyncMock(return_value="en")
+
     cog.chat_service.add_message_to_conversation = AsyncMock()
 
     return cog
@@ -184,6 +191,13 @@ class TestSummaryView:
             args = mock_cog.chat_service.send_split_message.call_args[0]
             assert args[1] == "The summary content."
             initial_msg.create_thread.assert_called()
+
+            # Verify language passed
+            # usage: summarize_messages(messages, user_id, model, billing_guild, language)
+            # Since it's an async generator, we check if it was called
+            # Note: The fixture mocks summarize_messages as an async gen function, so we can check mock_cog.summarizer.summarize_messages.call_args
+            call_kwargs = mock_cog.summarizer.summarize_messages.call_args.kwargs
+            assert call_kwargs.get("language") == "English"
 
     async def test_pipeline_no_messages(self, mock_cog, mock_ctx):
         view = SummaryView(mock_cog, mock_ctx, "en")

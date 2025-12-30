@@ -183,8 +183,17 @@ class StartSummaryButton(discord.ui.Button):
         if not self.cog.summarizer:
              return await initial_msg.edit(content="❌ Summarizer service not available.")
 
+        # Get user language for summary
+        user_lang_code = await self.cog.context_service.get_user_language(self.ctx.author.id)
+        from ..core.i18n import LANG_LABELS
+        user_lang_name = LANG_LABELS.get(user_lang_code, "English")
+
         async for update in self.cog.summarizer.summarize_messages(
-            messages, self.ctx.author.id, model=user_model, billing_guild=self.ctx.guild
+            messages,
+            self.ctx.author.id,
+            model=user_model,
+            billing_guild=self.ctx.guild,
+            language=user_lang_name
         ):
             if update.startswith("RESULT: "):
                 final_text = update[8:] # Remove prefix

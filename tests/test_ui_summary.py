@@ -27,6 +27,10 @@ class TestSummaryView:
         channel_group.conversations.set = AsyncMock()
         cog.config.channel.return_value = channel_group
 
+        # Mock context service
+        cog.context_service = Mock()
+        cog.context_service.get_user_language = AsyncMock(return_value="en")
+
         cog.bot = Mock()
         return cog
 

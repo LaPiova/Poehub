@@ -25,6 +25,7 @@ class SummarizerService:
         user_id: int,
         model: str = "gpt-4o",
         billing_guild=None,
+        language: str | None = None,
     ) -> AsyncIterator[str]:
         """Summarize a list of messages, handling large contexts via chunking.
 
@@ -42,7 +43,7 @@ class SummarizerService:
 
         if total_len <= CHUNK_LIMIT:
             yield "STATUS: Generating summary (single pass)..."
-            summary = await self._generate_summary(full_text, model, billing_guild)
+            summary = await self._generate_summary(full_text, model, billing_guild, language=language)
             yield f"RESULT: {summary}"
             return
 
@@ -63,7 +64,7 @@ class SummarizerService:
 
         async def _summarize_chunk_task(text: str) -> str:
             async with sem:
-                return await self._generate_summary(text, model, billing_guild, is_chunk=True)
+                return await self._generate_summary(text, model, billing_guild, is_chunk=True, language=language)
 
         results = await asyncio.gather(*[_summarize_chunk_task(c) for c in chunks])
         chunk_summaries = list(results)
@@ -73,7 +74,7 @@ class SummarizerService:
         # 4. Reduce Phase
         combined_summaries = "\n\n".join([f"Part {i+1}: {s}" for i, s in enumerate(chunk_summaries)])
 
-        final_summary = await self._generate_summary(combined_summaries, model, billing_guild, is_final=True)
+        final_summary = await self._generate_summary(combined_summaries, model, billing_guild, is_final=True, language=language)
         yield f"RESULT: {final_summary}"
 
     def _flatten_messages(self, messages: list[MessageData]) -> str:
@@ -111,23 +112,24 @@ class SummarizerService:
         model: str,
         billing_guild=None,
         is_chunk: bool = False,
-        is_final: bool = False
+        is_final: bool = False,
+        language: str | None = None,
     ) -> str:
+        lang_instruction = f" Write the summary in {language}." if language else " Identify the dominant language and write the summary in that language."
+
         if is_chunk:
             prompt = (
-                f"Summarize the following conversation segment concisely. "
+                f"Summarize the following conversation segment as detailed and accurate as possible.{lang_instruction} "
                 f"Capture key points and decisions.\n\n{text}"
             )
         elif is_final:
             prompt = (
                 f"Here are summaries of a long conversation split into parts. "
-                f"Synthesize them into a single coherent, comprehensive summary. "
-                f"Identify the dominant language and write the summary in that language.\n\n{text}"
+                f"Synthesize them into a single coherent, detailed, and accurate summary.{lang_instruction}\n\n{text}"
             )
         else:
             prompt = (
-                f"Please provide a comprehensive summary of the conversation below. "
-                f"Identify the dominant language and write the summary in that language.\n\n{text}"
+                f"Please provide a comprehensive, detailed, and accurate summary of the conversation below.{lang_instruction}\n\n{text}"
             )
 
         messages = [{"role": "user", "content": prompt}]
