@@ -64,6 +64,15 @@ class AccessControlView(discord.ui.View):
             limit_pts = await guild_conf.monthly_limit_points()
             spend_pts = await guild_conf.current_spend_points() or 0.0
 
+            # Roles
+            allowed_roles = await guild_conf.allowed_roles()
+            role_count = len(allowed_roles) if allowed_roles else 0
+            role_status = (
+                "🌍 Everyone (No restrictions)"
+                if role_count == 0
+                else f"🔒 Restricted to {role_count} role(s)"
+            )
+
             # Format Limits
             usd_str = "∞" if limit_usd is None else f"${limit_usd:.2f}"
             pts_str = "∞" if limit_pts is None else f"{limit_pts:,}"
@@ -72,7 +81,8 @@ class AccessControlView(discord.ui.View):
             status = "✅ Authorized" if is_allowed else "⛔ Unauthorized"
 
             embed.description = f"**Selected Guild:** {self.active_guild.name} (`{self.active_guild.id}`)"
-            embed.add_field(name="Status", value=status, inline=False)
+            embed.add_field(name="Status", value=status, inline=True)
+            embed.add_field(name="Role Access", value=role_status, inline=True)
 
             embed.add_field(
                 name="💰 Standard Budget (USD)",
@@ -92,6 +102,9 @@ class AccessControlView(discord.ui.View):
             self.add_item(self.toggle_btn)
             self.add_item(self.limit_btn)
             self.add_item(self.reset_btn)
+
+            # Add Role Select
+            self.add_item(RoleSelect(self.cog, self.active_guild, allowed_roles))
         else:
             embed.description = "Please select a guild from the dropdown below to manage its permissions."
 
@@ -145,6 +158,63 @@ class GuildSelect(discord.ui.Select):
         if isinstance(self.view, AccessControlView):
             self.view.active_guild = guild
             await self.view.update_view(interaction)
+
+
+class RoleSelect(discord.ui.Select):
+    """Dropdown to manage allowed roles."""
+
+    def __init__(
+        self, cog: PoeHub, guild: discord.Guild, current_allowed: list[int]
+    ) -> None:
+        self.cog = cog
+        self.guild = guild
+
+        options = []
+        # Filter and sort roles
+        # Exclude managed roles and @everyone
+        roles = sorted(guild.roles, key=lambda r: r.position, reverse=True)
+        valid_roles = [r for r in roles if not r.is_default() and not r.is_bot_managed()]
+
+        # Slice top 25
+        for role in valid_roles[:25]:
+            is_selected = role.id in (current_allowed or [])
+            options.append(
+                discord.SelectOption(
+                    label=role.name[:100],
+                    value=str(role.id),
+                    default=is_selected,
+                    description=f"ID: {role.id}",
+                )
+            )
+
+        if not options:
+            options.append(
+                discord.SelectOption(
+                    label="No valid roles found", value="none", default=False
+                )
+            )
+
+        super().__init__(
+            placeholder="Select Allowed Roles (Empty = All)",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.view.active_guild:
+            return
+
+        if "none" in self.values:
+            # Should not happen if strictly valid roles, but handle it
+            pass
+
+        selected_ids = [int(v) for v in self.values if v != "none"]
+        await self.cog.config.guild(self.view.active_guild).allowed_roles.set(
+            selected_ids
+        )
+        await self.view.update_view(interaction)
 
 
 class ToggleAccessButton(discord.ui.Button):
@@ -300,7 +370,7 @@ class BackButton(discord.ui.Button):
             label="Back to Settings",
             style=discord.ButtonStyle.secondary,
             emoji="⬅️",
-            row=2,
+            row=3,
         )
         self.cog = cog
         self.ctx = ctx

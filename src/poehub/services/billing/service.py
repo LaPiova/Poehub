@@ -73,7 +73,7 @@ class BillingService:
         """Determine which guild should be billed for the request."""
         # 1. Guild Channel
         if hasattr(channel, "guild") and channel.guild:
-            if await self.config.guild(channel.guild).access_allowed():
+            if await self.verify_guild_access(user, channel.guild):
                 return channel.guild
             return None
 
@@ -82,7 +82,7 @@ class BillingService:
         # We need to iterate over mutual guilds where the bot is present
         # user.mutual_guilds is available in discord.py
         for guild in user.mutual_guilds:
-            if await self.config.guild(guild).access_allowed():
+            if await self.verify_guild_access(user, guild):
                 candidates.append(guild)
 
         if not candidates:
@@ -107,6 +107,31 @@ class BillingService:
                 best_guild = guild
 
         return best_guild
+
+    async def verify_guild_access(self, user: discord.User, guild: discord.Guild) -> bool:
+        """Check if a user has access to a specific guild (via roles or general access)."""
+        # 1. Check if guild access is allowed globally
+        if not await self.config.guild(guild).access_allowed():
+            return False
+
+        # 2. Check Role Restrictions
+        allowed_roles = await self.config.guild(guild).allowed_roles()
+        if not allowed_roles:
+            return True  # No restrictions
+
+        member = guild.get_member(user.id)
+        if not member:
+            # Should not happen if we are checking mutual guilds, but possible if cache is stale
+            # Try fetching
+            try:
+                member = await guild.fetch_member(user.id)
+            except discord.NotFound:
+                return False
+
+        user_role_ids = [r.id for r in member.roles]
+        # Check intersection
+        has_role = any(r_id in user_role_ids for r_id in allowed_roles)
+        return has_role
 
     async def _reset_budget_if_new_month(self, guild: discord.Guild) -> None:
         """Reset guild spend if we are in a new month."""

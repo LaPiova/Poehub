@@ -70,6 +70,8 @@ def mock_config():
     conf.user_from_id.return_value = user_group
 
     guild_group = MagicMock()
+    guild_group.allowed_roles = AsyncMock(return_value=[])
+    guild_group.access_allowed = AsyncMock(return_value=True)
     conf.guild.return_value = guild_group
 
     return conf_cls

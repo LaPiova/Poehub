@@ -326,6 +326,7 @@ class TestBillingService:
         def guild_side_effect(g):
             m = Mock()
             m.access_allowed = AsyncMock(return_value=True)
+            m.allowed_roles = AsyncMock(return_value=[])
             if g.id == 100:
                 m.monthly_limit = AsyncMock(return_value=10.0)
             else:
@@ -350,6 +351,7 @@ class TestBillingService:
         mock_g = Mock()
         mock_config.guild.return_value = mock_g
         mock_g.access_allowed = AsyncMock(return_value=True)
+        mock_g.allowed_roles = AsyncMock(return_value=[])
         # Limit doesn't matter for single guild logic (if candidates==1)
 
         result = await service.resolve_billing_guild(user, channel)
@@ -380,6 +382,7 @@ class TestBillingService:
         def guild_side_effect(g):
             m = Mock()
             m.access_allowed = AsyncMock(return_value=True)
+            m.allowed_roles = AsyncMock(return_value=[])
             if g.id == 100:
                 m.monthly_limit = AsyncMock(return_value=10.0)
             else:

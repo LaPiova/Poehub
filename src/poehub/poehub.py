@@ -105,6 +105,7 @@ class PoeHub(red_commands.Cog):
             "current_spend_points": 0.0,  # Float/Int (Points)
             "last_reset_month": None,  # Str "YYYY-MM"
             "reminders": [],  # List[Dict] {timestamp, channel_id, message, mentions, author_id, created_at}
+            "allowed_roles": [],  # List[int] Role IDs allowed to access the bot (empty = all)
         }
 
         default_user = {
@@ -672,7 +673,7 @@ class PoeHub(red_commands.Cog):
                 "✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`."
             )
 
-    @red_commands.command(name="menu", aliases=["poehub", "home"])
+    @red_commands.hybrid_command(name="menu", aliases=["poehub", "home"])
     async def poehub_menu(self, ctx: red_commands.Context):
         """Open the unified PoeHub Home Menu."""
         lang = await self._get_language(ctx.author.id)
@@ -686,7 +687,7 @@ class PoeHub(red_commands.Cog):
         msg = await ctx.send(embed=embed, view=view)
         view.message = msg
 
-    @red_commands.command(name="reminder")
+    @red_commands.hybrid_command(name="reminder")
     @red_commands.guild_only()
     async def reminder_command(self, ctx: red_commands.Context):
         """Set a scheduled reminder with mentions."""
@@ -1152,7 +1153,7 @@ class PoeHub(red_commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @red_commands.command(name="conv", aliases=["conversations", "chatmenu"])
+    @red_commands.hybrid_command(name="conv", aliases=["conversations", "chatmenu"])
     async def conversation_menu(self, ctx: red_commands.Context):
         """Open the interactive conversation management menu"""
         if not self.conversation_manager:

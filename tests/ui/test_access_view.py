@@ -41,6 +41,7 @@ def mock_cog():
     mock_group.current_spend = create_config_item(1.5)
     mock_group.monthly_limit_points = create_config_item(1000)
     mock_group.current_spend_points = create_config_item(500)
+    mock_group.allowed_roles = create_config_item([])
 
     cog.config.guild.return_value = mock_group
 
