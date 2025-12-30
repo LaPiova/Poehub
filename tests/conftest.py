@@ -22,8 +22,10 @@ module_mock.core = core_mock
 commands_mock = MagicMock()
 commands_mock.Cog = MockCog
 commands_mock.command = lambda **kwargs: lambda func: func
+commands_mock.hybrid_command = lambda **kwargs: lambda func: func
 commands_mock.group = lambda **kwargs: lambda func: func
 commands_mock.is_owner = lambda: lambda func: func
+commands_mock.guild_only = lambda: lambda func: func
 core_mock.commands = commands_mock
 
 # bot

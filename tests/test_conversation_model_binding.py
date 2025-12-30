@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock, Mock
 
+import discord
 import pytest
 
 from poehub.services.chat import ChatService
@@ -65,6 +66,8 @@ class TestConversationModelBinding:
         user = Mock()
         user.id = 123
         message = Mock(author=user)
+        # Ensure it's treated as a DM so it uses user-scope conversation ID lookup
+        message.channel = AsyncMock(spec=discord.DMChannel)
 
         await mock_service.process_chat_request(message, "Hello")
 

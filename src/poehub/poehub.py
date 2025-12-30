@@ -105,6 +105,7 @@ class PoeHub(red_commands.Cog):
             "current_spend_points": 0.0,  # Float/Int (Points)
             "last_reset_month": None,  # Str "YYYY-MM"
             "reminders": [],  # List[Dict] {timestamp, channel_id, message, mentions, author_id, created_at}
+            "allowed_roles": [],  # List[int] Role IDs allowed to access the bot (empty = all)
         }
 
         default_user = {
@@ -115,9 +116,15 @@ class PoeHub(red_commands.Cog):
             "language": LANG_EN,  # Output language for menus/help
         }
 
+        default_channel = {
+            "conversations": {},  # Dict of conversation_id -> conversation data
+            "updated_at": 0,
+        }
+
         self.config.register_global(**default_global)
         self.config.register_user(**default_user)
         self.config.register_guild(**default_guild)
+        self.config.register_channel(**default_channel)
 
         self.conversation_manager: ConversationStorageService | None = None
         self.encryption: EncryptionHelper | None = None
@@ -404,13 +411,45 @@ class PoeHub(red_commands.Cog):
                         changed = True
 
                         # Clear memory cache
-                        # We need access to chat_service's memory. Ideally chat_service exposes this.
-                        # Accessing private member for now as per previous pattern
+                        # We pass the unique key for user scope
+                        unique_key = f"user:{user_id}:{conv_id}"
                         if self.chat_service:
-                            await self.chat_service._clear_conversation_memory(user_id, conv_id)
+                            await self.chat_service._clear_conversation_memory(unique_key)
 
                 if changed:
                     await self.config.user_from_id(user_id).conversations.set(conversations)
+
+            # --- Thread/Channel Cleanup (48h) ---
+            limit_thread = 48 * 60 * 60  # 2 days
+            all_channels = await self.config.all_channels()
+
+            for channel_id, channel_data in all_channels.items():
+                conversations = channel_data.get("conversations", {})
+                if not conversations:
+                    continue
+
+                changed = False
+                for conv_id, enc_data in conversations.items():
+                    data = self.conversation_manager.process_conversation_data(enc_data)
+                    if not data:
+                        continue
+
+                    updated_at = data.get("updated_at")
+                    if not updated_at:
+                         updated_at = data.get("created_at", now)
+
+                    if now - updated_at > limit_thread:
+                        log.info(f"Auto-clearing inactive thread {channel_id}")
+                        self.conversation_manager.clear_messages(data)
+                        conversations[conv_id] = self.conversation_manager.prepare_for_storage(data)
+                        changed = True
+
+                        unique_key = f"channel:{channel_id}:{conv_id}"
+                        if self.chat_service:
+                            await self.chat_service._clear_conversation_memory(unique_key)
+
+                if changed:
+                    await self.config.channel_from_id(channel_id).conversations.set(conversations)
 
         except Exception:
             log.exception("Error in auto-clear loop")
@@ -672,7 +711,7 @@ class PoeHub(red_commands.Cog):
                 "✅ Dummy API mode disabled. Remember to set a valid Poe API key with `[p]poeapikey`."
             )
 
-    @red_commands.command(name="menu", aliases=["poehub", "home"])
+    @red_commands.hybrid_command(name="menu", aliases=["poehub", "home"])
     async def poehub_menu(self, ctx: red_commands.Context):
         """Open the unified PoeHub Home Menu."""
         lang = await self._get_language(ctx.author.id)
@@ -683,10 +722,10 @@ class PoeHub(red_commands.Cog):
             description=tr(lang, "HOME_DESC"),
             color=discord.Color.blue(),
         )
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
-    @red_commands.command(name="reminder")
+    @red_commands.hybrid_command(name="reminder")
     @red_commands.guild_only()
     async def reminder_command(self, ctx: red_commands.Context):
         """Set a scheduled reminder with mentions."""
@@ -719,9 +758,9 @@ class PoeHub(red_commands.Cog):
 
         view = ReminderView(ctx, confirm_callback, user_reminders, delete_callback)
         embed = view.build_embed()
-        view.message = await ctx.send(embed=embed, view=view)
+        view.message = await ctx.send(embed=embed, view=view, ephemeral=True)
 
-    @red_commands.command(name="poeconfig", aliases=["config"])
+    @red_commands.hybrid_command(name="config", aliases=["poeconfig"])
     async def open_config_menu(self, ctx: red_commands.Context):
         """Open the interactive configuration panel"""
         lang = await self._get_language(ctx.author.id)
@@ -744,7 +783,7 @@ class PoeHub(red_commands.Cog):
             lang=lang,
         )
 
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
     @red_commands.command(name="language", aliases=["lang"])
@@ -783,6 +822,43 @@ class PoeHub(red_commands.Cog):
         """Check your current model setting"""
         model = await self.config.user(ctx.author).model()
         await ctx.send(f"🤖 Your current model: **{model}**")
+
+    @red_commands.hybrid_command(name="threadmodel", aliases=["tmodel"])
+    async def thread_model(self, ctx: red_commands.Context, *, model_name: str):
+        """
+        Set the model for the current thread.
+        Only works in threads.
+        """
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.send("❌ This command can only be used in a thread.")
+            return
+
+        # Check if bot can manage this thread (or at least read/write)
+        # We assume if it's processing commands, it can.
+
+        # We need the conversation data for this thread.
+        # ID is "default" for linear thread history.
+        channel_group = self.config.channel(ctx.channel)
+        conversations = await channel_group.conversations()
+
+        # Get or create current conversation
+        conv_id = "default"
+        if conv_id not in conversations:
+             # Initialize if not present (although chat usually does this)
+             conversations[conv_id] = self.conversation_manager.prepare_for_storage(
+                 {"id": conv_id, "messages": [], "model": model_name}
+             )
+        else:
+            # Update existing
+            data = self.conversation_manager.process_conversation_data(conversations[conv_id])
+            if not data:
+                data = {"id": conv_id, "messages": []}
+
+            data["model"] = model_name
+            conversations[conv_id] = self.conversation_manager.prepare_for_storage(data)
+
+        await channel_group.conversations.set(conversations)
+        await ctx.send(f"✅ Thread model set to: **{model_name}**")
 
     @red_commands.command(name="setdefaultprompt", aliases=["defprompt"])
     @red_commands.is_owner()
@@ -921,7 +997,8 @@ class PoeHub(red_commands.Cog):
         await self._save_conversation(ctx.author.id, active_conv_id, updated_conv)
 
         # Clear the in-memory cache using ThreadSafeMemory.clear()
-        await self.chat_service._clear_conversation_memory(ctx.author.id, active_conv_id)
+        unique_key = f"user:{ctx.author.id}:{active_conv_id}"
+        await self.chat_service._clear_conversation_memory(unique_key)
 
         await ctx.send(
             f"✅ Conversation history cleared for **{updated_conv.get('title', active_conv_id)}**."
@@ -1152,7 +1229,7 @@ class PoeHub(red_commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @red_commands.command(name="conv", aliases=["conversations", "chatmenu"])
+    @red_commands.hybrid_command(name="conv", aliases=["conversations", "chatmenu"])
     async def conversation_menu(self, ctx: red_commands.Context):
         """Open the interactive conversation management menu"""
         if not self.conversation_manager:
@@ -1162,7 +1239,7 @@ class PoeHub(red_commands.Cog):
         lang = await self._get_language(ctx.author.id)
         view = ConversationMenuView(self, ctx, lang)
         embed = await view.refresh_content(None)
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
     @red_commands.command(name="listmodels", aliases=["lm", "models"])
@@ -1303,7 +1380,12 @@ class PoeHub(red_commands.Cog):
 
         # Respond if: DM, mentioned, or in a bot-owned thread
         if not is_dm and not is_mentioned and not is_bot_thread:
+            # Debug logging for thread ignoring
+            if isinstance(message.channel, discord.Thread):
+                 log.debug(f"Ignoring thread msg: owner={message.channel.owner_id}, bot={self.bot.user.id}, content={message.content}")
             return
+
+        log.info(f"Processing msg: dm={is_dm}, mention={is_mentioned}, bot_thread={is_bot_thread}")
 
         # Prepare content
         content = message.content

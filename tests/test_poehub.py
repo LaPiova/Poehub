@@ -70,6 +70,14 @@ def mock_config():
     conf.user_from_id.return_value = user_group
 
     guild_group = MagicMock()
+    guild_group.allowed_roles = AsyncMock(return_value=[])
+    guild_group.access_allowed = AsyncMock(return_value=True)
+    guild_group.access_allowed = AsyncMock(return_value=True)
+
+    reminders = AsyncMock(return_value=[])
+    reminders.set = AsyncMock()
+    guild_group.reminders = reminders
+
     conf.guild.return_value = guild_group
 
     return conf_cls
@@ -185,7 +193,10 @@ async def test_poehub_menu(cog, mock_ctx):
     with patch("poehub.poehub.HomeMenuView") as MockHome:
          await cog.poehub_menu(mock_ctx)
          MockHome.assert_called()
+         # Verify ephemeral=True
          mock_ctx.send.assert_called()
+         call_kwargs = mock_ctx.send.call_args.kwargs
+         assert call_kwargs.get("ephemeral") is True
 
 @pytest.mark.asyncio
 async def test_ask_command(cog, mock_ctx):
@@ -226,7 +237,7 @@ async def test_clear_history(cog, mock_ctx, mock_config):
 
     cog.conversation_manager.clear_messages.assert_called()
     conf_inst.user_from_id.return_value.conversations.set.assert_called()
-    cog.chat_service._clear_conversation_memory.assert_awaited_once_with(mock_ctx.author.id, "conv1")
+    cog.chat_service._clear_conversation_memory.assert_awaited_once_with(f"user:{mock_ctx.author.id}:conv1")
     mock_ctx.send.assert_called()
 
 
@@ -420,7 +431,10 @@ async def test_conversation_menu(cog, mock_ctx, mock_config):
 
         MockConvView.assert_called_once()
         view_instance.refresh_content.assert_called()
+        # Verify ephemeral=True
         mock_ctx.send.assert_called()
+        call_kwargs = mock_ctx.send.call_args.kwargs
+        assert call_kwargs.get("ephemeral") is True
 
 @pytest.mark.asyncio
 async def test_on_message_bot_message(cog):
@@ -606,4 +620,34 @@ async def test_my_prompt_short_default(cog, mock_ctx, mock_config):
     await cog.my_prompt(mock_ctx)
 
     # Should show default in embed (lines 681-690)
+    # Should show default in embed (lines 681-690)
     mock_ctx.send.assert_called()
+
+@pytest.mark.asyncio
+async def test_config_menu_ephemeral(cog, mock_ctx, mock_config):
+    """Test that config menu uses ephemeral=True."""
+    await cog._initialize()
+    # Ensure get_matching_models is async
+    cog.chat_service.get_matching_models = AsyncMock(return_value=["gpt-4"])
+
+    with patch("poehub.poehub.PoeConfigView") as MockView:
+        await cog.open_config_menu(mock_ctx)
+        MockView.assert_called()
+        mock_ctx.send.assert_called()
+        call_kwargs = mock_ctx.send.call_args.kwargs
+        assert call_kwargs.get("ephemeral") is True
+
+@pytest.mark.asyncio
+async def test_reminder_command_ephemeral(cog, mock_ctx, mock_config):
+    """Test that reminder commmand uses ephemeral=True."""
+    await cog._initialize()
+    with patch("poehub.poehub.ReminderView") as MockView:
+         view = MagicMock()
+         MockView.return_value = view
+         view.build_embed.return_value = discord.Embed()
+
+         await cog.reminder_command(mock_ctx)
+
+         mock_ctx.send.assert_called()
+         call_kwargs = mock_ctx.send.call_args.kwargs
+         assert call_kwargs.get("ephemeral") is True

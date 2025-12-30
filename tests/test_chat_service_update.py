@@ -55,7 +55,8 @@ async def test_add_message_updates_timestamp():
     }
     storage.prepare_for_storage.return_value = "encrypted_blob"
 
-    await service._add_message_to_conversation(user_id, conv_id, "user", "hello")
+    unique_key = f"user:{user_id}:{conv_id}"
+    await service._add_message_to_conversation(user_config, conv_id, unique_key, "user", "hello")
 
     call_args = user_config.conversations.set.call_args
     assert call_args is not None
