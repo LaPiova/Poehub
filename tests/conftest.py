@@ -31,6 +31,9 @@ core_mock.commands = commands_mock
 # bot
 bot_module_mock = MagicMock()
 bot_module_mock.Red = MagicMock()
+bot_module_mock.app_commands = MagicMock()
+bot_module_mock.app_commands.describe = lambda **kwargs: lambda func: func
+bot_module_mock.app_commands.command = lambda **kwargs: lambda func: func
 core_mock.bot = bot_module_mock
 
 # config

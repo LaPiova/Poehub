@@ -213,6 +213,13 @@ class IPoeHub(Protocol):
     async def _build_model_select_options(
         self, query: str | None = None
     ) -> list[Any]: ...
+    async def run_summary_pipeline(
+        self,
+        ctx: Any,
+        channel: Any,
+        hours: float,
+        language: str | None = None,
+    ) -> None: ...
     async def _build_config_embed(
         self, ctx: Any, owner_mode: bool, dummy_state: bool, lang: str
     ) -> Any: ...

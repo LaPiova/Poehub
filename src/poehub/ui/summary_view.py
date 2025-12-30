@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
 
 import discord
 from pydantic import BaseModel
@@ -12,7 +10,6 @@ from redbot.core import commands as red_commands
 
 from ..core.i18n import tr
 from ..core.protocols import IPoeHub
-from ..models import MessageData
 from .common import BackButton, CloseMenuButton
 
 log = logging.getLogger("red.poehub.summary")
@@ -114,167 +111,21 @@ class StartSummaryButton(discord.ui.Button):
         self.ctx = ctx
         self.lang = lang
 
-    async def callback(self, interaction: discord.Interaction) -> None:
-        view: SummaryView = self.view  # type: ignore
-        channel = self.ctx.channel
+    async def callback(self, interaction: discord.Interaction):
+        view: SummaryView = self.view
+        # Defer interaction to prevent timeout while we start the process
+        await interaction.response.defer(ephemeral=False, thinking=False)
 
-        if not isinstance(channel, discord.TextChannel):
-            return await interaction.response.send_message(
-                "Guild text channels only.", ephemeral=True
-            )
-
-        await interaction.response.defer()
-
-        # Disable UI
-        for child in view.children:
-            child.disabled = True
-        await interaction.edit_original_response(view=view)
-
-        # Start Process
-        await self._run_summary_pipeline(channel, view.selected_hours)
-
-    async def _fetch_messages_producer(
-        self, channel: discord.TextChannel, after_time: datetime
-    ) -> AsyncGenerator[list[MessageData], None]:
-        """Producer: Yields chunks of formatted messages."""
-        batch = []
-        async for msg in channel.history(
-            after=after_time, limit=None, oldest_first=True
-        ):
-            if msg.author.bot or (not msg.content and not msg.attachments):
-                continue
-
-            data = MessageData(
-                author=msg.author.display_name,
-                content=msg.content or "[Image/Attachment]",
-                timestamp=msg.created_at.strftime("%Y-%m-%d %H:%M"),
-            )
-            batch.append(data)
-
-            if len(batch) >= 50:  # Yield every 50 messages
-                yield batch
-                batch = []
-
-        if batch:
-            yield batch
-
-    async def _run_summary_pipeline(self, channel: discord.TextChannel, hours: float):
-        initial_msg = await channel.send(f"🔄 Scanning messages from last {hours}h...")
-
-        # 1. Fetch Messages
-        now = datetime.now(UTC)
-        after_time = now - timedelta(hours=hours)
-
-        messages: list[MessageData] = []
-        async for batch in self._fetch_messages_producer(channel, after_time):
-            messages.extend(batch)
-
-        if not messages:
-            return await initial_msg.edit(content="❌ No messages found in time range.")
-
-        message_count = len(messages)
-        await initial_msg.edit(content=f"📝 Found {message_count} messages. Starting summary...")
-
-        # 2. Run Service
-        user_model = await self.cog.config.user(self.ctx.author).model()
-        final_text = ""
-
-        # We need to verify if summarizer exists (it should via IPoeHub but implementation might be partial in tests)
-        if not self.cog.summarizer:
-             return await initial_msg.edit(content="❌ Summarizer service not available.")
-
-        # Get user language for summary
-        user_lang_code = await self.cog.context_service.get_user_language(self.ctx.author.id)
-        from ..core.i18n import LANG_LABELS
-        user_lang_name = LANG_LABELS.get(user_lang_code, "English")
-
-        async for update in self.cog.summarizer.summarize_messages(
-            messages,
-            self.ctx.author.id,
-            model=user_model,
-            billing_guild=self.ctx.guild,
-            language=user_lang_name
-        ):
-            if update.startswith("RESULT: "):
-                final_text = update[8:] # Remove prefix
-            elif update.startswith("STATUS: "):
-                # Update status message occasionally?
-                # To avoid rate limits, we could debounce, but let's just try editing.
-                # If too fast, it might error.
-                try:
-                    await initial_msg.edit(content=f"📝 {update[8:]}")
-                except discord.HTTPException:
-                    pass
-
-        if not final_text:
-            return await initial_msg.edit(content="❌ Failed to generate summary.")
-
-        # 3. Send Result
-        try:
-            thread = await initial_msg.create_thread(
-                name=f"Summary: Last {hours}h", auto_archive_duration=60
-            )
-            import asyncio
-            await asyncio.sleep(0.5) # Propagate thread
-
-            target = thread
-
-            # --- Thread History Initialization ---
-            # Use ChatService to initialize thread context
-            if self.cog.chat_service:
-                # 1. Determine Scope
-                scope_group = self.cog.config.channel(target)
-                conv_id = "default"
-                unique_key = f"channel:{target.id}:{conv_id}"
-                log.info(f"SummaryView initializing thread history: key={unique_key}, target_id={target.id}")
-
-                # 2. Init Conversation with Model
-                # Reuse the model we used for summary
-                conv_data = {"id": conv_id, "messages": [], "model": user_model}
-
-                # We need to access conversation manager via chat service or cog
-                # But ChatService methods usually handle get_or_create.
-                # Let's verify if we can set the model via ChatService?
-                # Currently ChatService.add_message doesn't set model explicitly if not exists.
-                # So we manually init via conversation manager first (like thread_model command)
-
-                conversations = await scope_group.conversations()
-                if conv_id not in conversations:
-                    log.info(f"Creating new conversation entry for {unique_key}")
-                    # Prepare initial data
-                    if self.cog.conversation_manager:
-                         conversations[conv_id] = self.cog.conversation_manager.prepare_for_storage(conv_data)
-                    else:
-                         # Fallback if manager not explicit
-                         conversations[conv_id] = conv_data
-                    await scope_group.conversations.set(conversations)
-
-                # 3. Add Trigger Message (User Request)
-                trigger_text = f"Summarize messages from last {hours} hours."
-                await self.cog.chat_service.add_message_to_conversation(
-                    scope_group, conv_id, unique_key, "user", trigger_text
-                )
-
-                # 4. Add Result Message (Assistant Response)
-                await self.cog.chat_service.add_message_to_conversation(
-                    scope_group, conv_id, unique_key, "assistant", final_text
-                )
-                log.info(f"Saved summary messages to {unique_key}")
-
-        except discord.Forbidden:
-            target = channel
-
-        await self.cog.chat_service.send_split_message(target, final_text)
-
-        await initial_msg.edit(
-            content=f"✅ Summary generated for {message_count} messages."
+        await self.view.cog.run_summary_pipeline(
+            self.view.ctx,
+            self.view.ctx.channel,
+            view.selected_hours,
+            interaction=interaction
         )
 
 
 class SummaryView(discord.ui.View):
-    def __init__(
-        self, cog: IPoeHub, ctx: red_commands.Context, lang: str, back_callback=None
-    ):
+    def __init__(self, cog: IPoeHub, ctx: red_commands.Context, lang: str, back_callback: callable | None = None) -> None:
         super().__init__(timeout=180)
         self.cog = cog
         self.ctx = ctx

@@ -5,7 +5,6 @@ import discord
 import pytest
 
 from poehub.services.chat import ChatService
-from poehub.ui.summary_view import SummaryView
 
 
 @pytest.fixture
@@ -38,9 +37,15 @@ def mock_ctx():
 
 @pytest.mark.asyncio
 async def test_summary_pipeline_creates_thread_and_saves_history(mock_cog, mock_ctx):
-    # Setup
-    view = SummaryView(mock_cog, mock_ctx, "en-US")
-    view.selected_hours = 1.0
+    # Setup - effectively testing run_summary_pipeline on a mock-like object
+    # Since run_summary_pipeline is now on PoeHub, we need an instance or bind it.
+    # We can import it and bind it to mock_cog.
+
+    from poehub.poehub import PoeHub
+
+    # Bind the method to our mock cog
+    # We use __get__ to bind it as a method
+    mock_cog.run_summary_pipeline = PoeHub.run_summary_pipeline.__get__(mock_cog, PoeHub)
 
     # Mock channel history
     mock_message = MagicMock()
@@ -74,15 +79,9 @@ async def test_summary_pipeline_creates_thread_and_saves_history(mock_cog, mock_
     mock_scope.conversations.return_value = {} # Empty initially
     mock_scope.conversations.set = AsyncMock()
 
-    from poehub.ui.summary_view import StartSummaryButton
-
     # Execution
-    button = StartSummaryButton(mock_cog, mock_ctx, "en-US")
-    # Mock view parent for the button? The button uses self.cog which is passed in init.
-    # It doesn't seem to access self.view in _run_summary_pipeline, only in callback.
-    # checking _run_summary_pipeline... it uses self.cog, self.ctx.
-
-    await button._run_summary_pipeline(mock_ctx.channel, 1.0)
+    # Call the bound method directly
+    await mock_cog.run_summary_pipeline(mock_ctx, mock_ctx.channel, 1.0)
 
     # Assertions
 
@@ -108,10 +107,4 @@ async def test_summary_pipeline_creates_thread_and_saves_history(mock_cog, mock_
     call2 = mock_cog.chat_service.add_message_to_conversation.call_args_list[1]
     assert call2[0][3] == "assistant"
     assert "Summary content" in call2[0][4]
-
-# Helper hack to access the method on the button which is dynamically bound?
-# No, _run_summary_pipeline is on the StartSummaryButton class in the real code?
-# Wait, let's check summary_view.py again.
-# _run_summary_pipeline is a method of StartSummaryButton, NOT SummaryView.
-# So I need to instantiate the button to test it.
 
