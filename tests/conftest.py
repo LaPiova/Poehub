@@ -25,6 +25,7 @@ commands_mock.command = lambda **kwargs: lambda func: func
 commands_mock.hybrid_command = lambda **kwargs: lambda func: func
 commands_mock.group = lambda **kwargs: lambda func: func
 commands_mock.is_owner = lambda: lambda func: func
+commands_mock.guild_only = lambda: lambda func: func
 core_mock.commands = commands_mock
 
 # bot

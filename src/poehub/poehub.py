@@ -684,7 +684,7 @@ class PoeHub(red_commands.Cog):
             description=tr(lang, "HOME_DESC"),
             color=discord.Color.blue(),
         )
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
     @red_commands.hybrid_command(name="reminder")
@@ -720,9 +720,9 @@ class PoeHub(red_commands.Cog):
 
         view = ReminderView(ctx, confirm_callback, user_reminders, delete_callback)
         embed = view.build_embed()
-        view.message = await ctx.send(embed=embed, view=view)
+        view.message = await ctx.send(embed=embed, view=view, ephemeral=True)
 
-    @red_commands.command(name="poeconfig", aliases=["config"])
+    @red_commands.hybrid_command(name="config", aliases=["poeconfig"])
     async def open_config_menu(self, ctx: red_commands.Context):
         """Open the interactive configuration panel"""
         lang = await self._get_language(ctx.author.id)
@@ -745,7 +745,7 @@ class PoeHub(red_commands.Cog):
             lang=lang,
         )
 
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
     @red_commands.command(name="language", aliases=["lang"])
@@ -1163,7 +1163,7 @@ class PoeHub(red_commands.Cog):
         lang = await self._get_language(ctx.author.id)
         view = ConversationMenuView(self, ctx, lang)
         embed = await view.refresh_content(None)
-        msg = await ctx.send(embed=embed, view=view)
+        msg = await ctx.send(embed=embed, view=view, ephemeral=True)
         view.message = msg
 
     @red_commands.command(name="listmodels", aliases=["lm", "models"])
