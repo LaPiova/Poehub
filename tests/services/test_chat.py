@@ -32,6 +32,12 @@ class TestChatService:
         config.user_from_id.return_value = user_conf
         config.user.return_value = user_conf
 
+        # Channel config mocks
+        chan_conf = Mock()
+        chan_conf.conversations = AsyncMock(return_value={})
+        chan_conf.conversations.set = AsyncMock()
+        config.channel.return_value = chan_conf
+
         return config
 
     @pytest.fixture
@@ -126,10 +132,10 @@ class TestChatService:
 
         # Mock internal helpers to isolate flow
         with patch.object(service, "stream_response", new_callable=AsyncMock) as mock_stream:
-           with patch.object(service, "_resolve_quote_context", return_value=""):
-               with patch.object(service, "_extract_image_urls", return_value=[]):
-                   with patch.object(service, "_add_message_to_conversation", new_callable=AsyncMock):
-                       with patch.object(service, "_determine_response_target", new_callable=AsyncMock):
+            with patch.object(service, "_resolve_quote_context", new_callable=AsyncMock, return_value=""):
+                with patch.object(service, "_extract_image_urls", return_value=[]):
+                    with patch.object(service, "_add_message_to_conversation", new_callable=AsyncMock):
+                        with patch.object(service, "_determine_response_target", new_callable=AsyncMock):
                             message = AsyncMock(spec=discord.Message)
                             message.channel = AsyncMock(spec=discord.TextChannel)
                             await service.process_chat_request(message, "hello", None)
@@ -214,14 +220,14 @@ class TestChatService:
                     messages=[],
                     model="gpt-4",
                     target_channel=target_channel,
-                    save_to_conv=(123, "c1")
+                    save_to_conv=(service.config.user(123), "c1", "user:123:c1")
                 )
 
                 # Verify edits happened due to pacing
                 assert response_msg.edit.call_count >= 1
                 # Verify save called
                 mock_add.assert_called_with(
-                    123, "c1", "assistant", "Part 1Part 2"
+                    service.config.user(123), "c1", "user:123:c1", "assistant", "Part 1Part 2"
                 )
 
     async def test_stream_response_error(self, service):
@@ -292,8 +298,9 @@ class TestChatService:
 
     async def test_conversation_helpers(self, service, mock_conv_manager):
         user_id = 999
+        scope = service.config.user(user_id)
         conv_id = "c1"
-        res = await service._get_conversation(user_id, conv_id)
+        res = await service._get_conversation(scope, conv_id)
         assert res is None
-        await service._save_conversation(user_id, conv_id, {"msg": "foo"})
+        await service._save_conversation(scope, conv_id, {"msg": "foo"})
         # Should call config set

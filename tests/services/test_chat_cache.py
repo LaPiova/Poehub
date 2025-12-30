@@ -27,18 +27,24 @@ async def test_clear_conversation_memory():
     conv_id = "test_conv"
 
     # Call the method
-    await service._clear_conversation_memory(user_id, conv_id)
+    unique_key = f"user:{user_id}:{conv_id}"
 
-    # Verify _get_memory was called with correct args
-    service._get_memory.assert_awaited_once_with(user_id, conv_id)
+    # Pre-populate memory
+    service._memories[unique_key] = mock_memory
 
-    # Verify clear was called on the memory
+    # Call the method
+    await service._clear_conversation_memory(unique_key)
+
+    # Verify memory clear called
     mock_memory.clear.assert_awaited_once()
+
+    # Verify _get_memory was NOT called (it avoids it for optimization)
+    service._get_memory.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_clear_conversation_memory_creates_if_not_exists():
-    """Test that _clear_conversation_memory creates memory if it doesn't exist."""
+async def test_clear_conversation_memory_does_nothing_if_not_exists():
+    """Test that _clear_conversation_memory does nothing if memory doesn't exist."""
     service = ChatService(
         bot=None,
         config=None,
@@ -47,20 +53,14 @@ async def test_clear_conversation_memory_creates_if_not_exists():
         conversation_manager=None
     )
 
-    # Don't mock _get_memory, let it run naturally
-    # Mock the underlying methods it needs
-    service._get_or_create_conversation = AsyncMock(return_value={"messages": []})
-
     user_id = 456
     conv_id = "conv2"
 
-    # Call the method - should create memory and clear it
-    await service._clear_conversation_memory(user_id, conv_id)
+    # Call the method - should NOT create memory
+    unique_key = f"user:{user_id}:{conv_id}"
+    await service._clear_conversation_memory(unique_key)
 
-    # Verify memory was created
-    key = f"{user_id}:{conv_id}"
-    assert key in service._memories
+    # Verify memory was NOT created
+    assert unique_key not in service._memories
 
-    # Verify it's empty
-    messages = await service._memories[key].get_messages()
-    assert messages == []
+

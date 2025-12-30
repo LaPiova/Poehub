@@ -56,7 +56,7 @@ async def test_auto_clear_loop_logic():
     user_config_mock.conversations.set.assert_awaited()
 
     # Verify memory clear
-    cog.chat_service._clear_conversation_memory.assert_awaited_with(user_id, conv_id)
+    cog.chat_service._clear_conversation_memory.assert_awaited_once_with(f"user:{user_id}:{conv_id}")
 
 
 @pytest.mark.asyncio

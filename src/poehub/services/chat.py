@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -142,20 +143,7 @@ class ChatService:
         target_channel = message.channel
         user = message.author
 
-        # Get preferences & Context
-        active_conv_id = await self.context.get_active_conversation_id(user.id)
-
-        # Load conversation to check for specific model
-        conv_data = await self._get_conversation(user.id, active_conv_id)
-        if conv_data and conv_data.get("model"):
-            user_model = conv_data["model"]
-        else:
-            user_model = await self.config.user(user).model()
-
-        # Load history
-        history = await self._get_conversation_messages(user.id, active_conv_id)
-
-        # --- Access & Budget ---
+        # --- Access & Budget (Check first before creating threads) ---
         billing_guild = await self.billing.resolve_billing_guild(user, target_channel)
         if not billing_guild:
             if ctx:
@@ -176,6 +164,48 @@ class ChatService:
                 await target_channel.send(msg)
             return
 
+        # --- Determine Response Target (Create Thread if needed) ---
+        response_target = await self._determine_response_target(
+            message, target_channel, content
+        )
+
+        # --- Determine Scope (User vs Channel/Thread) ---
+        # "chat history stored by user is only for DMs"
+        is_dm = isinstance(target_channel, discord.DMChannel)
+
+        if is_dm:
+            # User Scope
+            scope_group = self.config.user_from_id(user.id)
+            conv_id = await self.context.get_active_conversation_id(user.id)
+            unique_key = f"user:{user.id}:{conv_id}"
+
+            # Use User's model preference
+            active_conv_data = await self._get_conversation(scope_group, conv_id)
+            if active_conv_data and active_conv_data.get("model"):
+                user_model = active_conv_data["model"]
+            else:
+                user_model = await self.config.user(user).model()
+        else:
+            # Channel/Thread Scope (Shared Context)
+            # Use the ID of the response target (Thread or Channel)
+            context_id = response_target.id
+            scope_group = self.config.channel(response_target)
+            conv_id = "default" # Threads have a single linear history
+            unique_key = f"channel:{context_id}:{conv_id}"
+
+            # For shared context, whose model do we use?
+            # We'll use the current user's preference for now, or fall back to a default.
+            # But if the conversation has a specific model set (e.g. manually switched), use it.
+            active_conv_data = await self._get_conversation(scope_group, conv_id)
+            if active_conv_data and active_conv_data.get("model"):
+                user_model = active_conv_data["model"]
+            else:
+                user_model = await self.config.user(user).model()
+
+        # Load history from the determined scope
+        history = await self._get_conversation_messages(scope_group, conv_id, unique_key)
+        log.info(f"Loaded history for {unique_key}: {len(history)} msgs")
+
         # --- Quote / Reply Context ---
         quote_context = await self._resolve_quote_context(message)
 
@@ -189,42 +219,48 @@ class ChatService:
             formatted_content = self.client.format_image_message(
                 full_text_input, image_urls
             )
-            new_message = {"role": "user", "content": formatted_content}
         else:
-            new_message = {"role": "user", "content": full_text_input}
+            # For text-only, we just use full_text_input
+            formatted_content = full_text_input
 
-            # For text-only, we just use full_text_input as the content to save if it's simpler,
-            # but formatted_content is safer if consistent.
-            # In original code: msg_content_to_save = formatted_content if image_urls else full_text_input
-
-        # Save to history
-        msg_content_to_save = formatted_content if image_urls else full_text_input
+        # Save to history (User or Thread scope)
         await self._add_message_to_conversation(
-            user.id, active_conv_id, "user", msg_content_to_save
+            scope_group, conv_id, unique_key, "user", formatted_content
         )
 
         # Combine history
+        # Note: formatted_content is for storage, we need dict for API
+        new_message = {"role": "user", "content": formatted_content}
         messages = history + [new_message]
 
-        # System Prompt
+        # System Prompt (User's custom prompt - applied even in threads?)
+        # User said "Anyone who respond in the thread shares the context".
+        # Maybe system prompt should be consistent?
+        # For now, applying the current user's system prompt seems safest/most personalized
+        # unless we support per-thread system prompts (future feature).
         system_prompt = await self.context.get_user_system_prompt(user.id)
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
-        # --- Response Target ---
-        response_target = await self._determine_response_target(
-            message, target_channel, content
-        )
-
         # --- Stream Response ---
-        await self.stream_response(
-            ctx=ctx,
-            messages=messages,
-            model=user_model,
-            target_channel=response_target,
-            save_to_conv=(user.id, active_conv_id),
-            billing_guild=billing_guild,
-        )
+        try:
+            await self.stream_response(
+                ctx=ctx,
+                messages=messages,
+                model=user_model,
+                target_channel=response_target,
+                save_to_conv=(scope_group, conv_id, unique_key),
+                billing_guild=billing_guild,
+            )
+        except Exception as e:
+            log.exception("Failed to stream response")
+            # Fallback: try to send error to the original channel if the target was a new thread
+            if response_target != message.channel:
+                 try:
+                     await message.channel.send(f"❌ Error occurred in thread: {e}")
+                 except Exception:
+                     pass
+            raise e
 
     async def get_response(
         self,
@@ -310,9 +346,9 @@ class ChatService:
                     await dest.send(chunk)
 
                 if save_to_conv:
-                    user_id, conv_id = save_to_conv
+                    scope_group, conv_id, unique_key = save_to_conv
                     await self._add_message_to_conversation(
-                        user_id, conv_id, "assistant", accumulated_content
+                        scope_group, conv_id, unique_key, "assistant", accumulated_content
                     )
             else:
                 await response_msg.edit(content="❌ No response received from API.")
@@ -428,24 +464,24 @@ class ChatService:
                 if not thread_name.strip():
                     thread_name = "AI Response"
 
-                return await message.create_thread(
+                thread = await message.create_thread(
                     name=thread_name, auto_archive_duration=60
                 )
+                # Small delay to ensure thread propagation
+                await asyncio.sleep(0.5)
+                return thread
             except (discord.Forbidden, discord.HTTPException) as e:
                 log.warning(f"Could not create thread: {e}")
 
         return target_channel
 
     # --- Conversation Helpers (Proxy to Manager + Context) ---
-    # We duplicate some logic here because ChatService needs to resolve "active_conv_id" -> "conversation data"
-    # The PoeHub class had _get_conversation, _add_message_to_conversation etc.
-    # Ideally, we should unify this.
 
     async def _get_conversation(
-        self, user_id: int, conv_id: str
+        self, scope_group: Any, conv_id: str
     ) -> dict[str, Any] | None:
-        """Get processed conversation data."""
-        conversations = await self.config.user_from_id(user_id).conversations()
+        """Get processed conversation data from a config group (User or Channel)."""
+        conversations = await scope_group.conversations()
         if conv_id in conversations:
             return self.conversation_manager.process_conversation_data(
                 conversations[conv_id]
@@ -453,50 +489,46 @@ class ChatService:
         return None
 
     async def _get_or_create_conversation(
-        self, user_id: int, conv_id: str
+        self, scope_group: Any, conv_id: str
     ) -> dict[str, Any]:
         """Get or create conversation."""
-        conv = await self._get_conversation(user_id, conv_id)
+        conv = await self._get_conversation(scope_group, conv_id)
         if conv is None:
             conv = self.conversation_manager.create_conversation(conv_id)
-            await self._save_conversation(user_id, conv_id, conv)
+            await self._save_conversation(scope_group, conv_id, conv)
         return conv
 
     async def _save_conversation(
-        self, user_id: int, conv_id: str, conv_data: dict[str, Any]
+        self, scope_group: Any, conv_id: str, conv_data: dict[str, Any]
     ):
-        """Save conversation data (encrypted)."""
-        conversations = await self.config.user_from_id(user_id).conversations()
+        """Save conversation data (encrypted) to the config group."""
+        conversations = await scope_group.conversations()
         conversations[conv_id] = self.conversation_manager.prepare_for_storage(
             conv_data
         )
-        await self.config.user_from_id(user_id).conversations.set(conversations)
+        await scope_group.conversations.set(conversations)
 
-    async def _get_memory(self, user_id: int, conv_id: str) -> ThreadSafeMemory:
-        """Get or initialize the ThreadSafeMemory for a conversation."""
-        key = f"{user_id}:{conv_id}"
-        if key not in self._memories:
-            # Load existing messages from storage
-            conv = await self._get_or_create_conversation(user_id, conv_id)
-            messages = conv.get("messages", [])
-            self._memories[key] = ThreadSafeMemory(messages)
-        return self._memories[key]
-
-    async def _clear_conversation_memory(self, user_id: int, conv_id: str) -> None:
-        """Clear the in-memory conversation messages using ThreadSafeMemory.clear().
-        This should be called when conversation history is cleared to ensure
-        the cached memory is also cleared.
+    async def _get_memory(self, scope_group: Any, conv_id: str, unique_key: str) -> ThreadSafeMemory:
+        """Get or initialize the ThreadSafeMemory for a conversation.
+        unique_key: A unique string identifier for caching (e.g. 'user:123:conv' or 'channel:456:conv')
         """
-        memory = await self._get_memory(user_id, conv_id)
-        await memory.clear()
+        if unique_key not in self._memories:
+            # Load existing messages from storage
+            conv = await self._get_or_create_conversation(scope_group, conv_id)
+            messages = conv.get("messages", [])
+            self._memories[unique_key] = ThreadSafeMemory(messages)
+        return self._memories[unique_key]
 
-
+    async def _clear_conversation_memory(self, unique_key: str) -> None:
+        """Clear the in-memory conversation messages."""
+        if unique_key in self._memories:
+            await self._memories[unique_key].clear()
 
     async def _add_message_to_conversation(
-        self, user_id: int, conv_id: str, role: str, content: Any
+        self, scope_group: Any, conv_id: str, unique_key: str, role: str, content: Any
     ):
         """Add message to conversation using ThreadSafeMemory."""
-        memory = await self._get_memory(user_id, conv_id)
+        memory = await self._get_memory(scope_group, conv_id, unique_key)
 
         # Prepare the message object (mimicking storage format)
         new_msg = {"role": role, "content": content, "timestamp": time.time()}
@@ -505,39 +537,28 @@ class ChatService:
         await memory.add_message(new_msg)
 
         # Write-through to persistence
-        # We fetch the full list from memory to ensure we catch any concurrent updates
-        # committed to the sequence.
         all_messages = await memory.get_messages()
-
-        # Enforce history limit (redundant but safe to do here or in storage service)
-        #Ideally storage service handles this, but since we are bypassing
-        # storage.add_message to use direct memory manipulation, we should prune here
-        # OR just push the full list to storage and let it handle/overwrite.
-        # However, conversation_manager.add_message does the pruning logic.
-        # To reuse that logic without race we should probably rely on memory first.
 
         # Simple Pruning for safer write-back
         MAX_HISTORY = 50
         if len(all_messages) > MAX_HISTORY:
             all_messages = all_messages[-MAX_HISTORY:]
-            # Ideally update memory buffer too?
-            # ThreadSafeMemory doesn't have a 'replace' method exposed yet easily without clear+add.
-            # For now, we just save the pruned list to disk.
 
-        conv = await self._get_or_create_conversation(user_id, conv_id)
+        conv = await self._get_or_create_conversation(scope_group, conv_id)
         conv["messages"] = all_messages
         conv["updated_at"] = time.time()
-        await self._save_conversation(user_id, conv_id, conv)
+        await self._save_conversation(scope_group, conv_id, conv)
 
     async def _get_conversation_messages(
-        self, user_id: int, conv_id: str
+        self, scope_group: Any, conv_id: str, unique_key: str
     ) -> list[dict[str, str]]:
         """Get messages formatted for API from memory."""
-        memory = await self._get_memory(user_id, conv_id)
+        memory = await self._get_memory(scope_group, conv_id, unique_key)
         messages = await memory.get_messages()
 
         return [
             {"role": msg["role"], "content": msg["content"]}
             for msg in messages
         ]
+
 
