@@ -128,14 +128,40 @@ class TestOpenAIProvider:
 
         # Verify extra_body parameters
         call_kwargs = provider.client.chat.completions.create.call_args.kwargs
-        assert "extra_body" in call_kwargs
-        assert call_kwargs["extra_body"]["web_search"] is True
-        assert call_kwargs["extra_body"]["thinking_level"] == "high"
-        assert call_kwargs["extra_body"]["quality"] == "high"
+        assert "extra_body" not in call_kwargs
 
         assert chunks == ["Hello"]
         assert usage.currency == "USD"
         assert usage.input_tokens == 5
+
+    @pytest.mark.asyncio
+    async def test_stream_chat_overrides(self, provider):
+        # Test override functionality
+        chunk = Mock()
+        chunk.choices = [Mock(delta=Mock(content="Hi"))]
+        chunk.usage = None
+
+        async def stream_gen(*args, **kwargs):
+            yield chunk
+
+        provider.client.chat.completions.create.side_effect = stream_gen
+
+        overrides = {
+            "web_search_override": False,
+            "thinking_level": "low",
+            "quality": "standard"
+        }
+
+        # Consume stream
+        async for _ in provider.stream_chat("gpt-4", [{"role": "user"}], **overrides):
+            pass
+
+        call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+        extra_body = call_kwargs["extra_body"]
+
+        assert extra_body["web_search"] is False
+        assert extra_body["thinking_level"] == "low"
+        assert extra_body["quality"] == "standard"
 
     @pytest.mark.asyncio
     async def test_fetch_openrouter_pricing(self, provider, mock_httpx):

@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import discord
 import pytest
@@ -19,6 +19,7 @@ class TestConversationModelBinding:
         # Setup basic config mocks
         config.user.return_value.model = AsyncMock(return_value="default-gpt")
         config.channel.return_value.conversations = AsyncMock(return_value={})
+        config.user_from_id.return_value.conversations = AsyncMock(return_value={})
 
         # Setup service
         service = ChatService(bot, config, billing, context, conv_manager)
@@ -35,6 +36,10 @@ class TestConversationModelBinding:
         service.add_message_to_conversation = AsyncMock()
         service._determine_response_target = AsyncMock(return_value=Mock())
         service.stream_response = AsyncMock()
+
+        # Mock optimizer
+        service.optimizer = MagicMock()
+        service.optimizer.optimize_request = AsyncMock(return_value={})
 
         # Fix missing context mock
         service.context.get_user_system_prompt = AsyncMock(return_value=None)

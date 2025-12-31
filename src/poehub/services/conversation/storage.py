@@ -97,6 +97,7 @@ class ConversationStorageService:
     def clear_messages(self, conversation: dict[str, Any]) -> dict[str, Any]:
         """Clear all messages from the conversation."""
         conversation["messages"] = []
+        conversation.pop("optimizer_settings", None)
         return conversation
 
     def get_api_messages(self, conversation: dict[str, Any]) -> list[dict[str, Any]]:

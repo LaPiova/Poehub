@@ -43,6 +43,10 @@ class ChatService:
         self.context = context_service
         self.conversation_manager = conversation_manager
 
+        # We need to import RequestOptimizer here to avoid circular imports if any
+        from .optimizer import RequestOptimizer
+        self.optimizer = RequestOptimizer(config)
+
         self.client: BaseLLMClient | None = None
 
         # Memory Cache: "user_id:conv_id" -> ThreadSafeMemory
@@ -242,6 +246,18 @@ class ChatService:
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
+        # --- Optimize Request (Persistent) ---
+        # Ensure we have the conversation object
+        conv = await self._get_or_create_conversation(scope_group, conv_id)
+
+        optimizer_settings = conv.get("optimizer_settings")
+        if optimizer_settings is None:
+             optimizer_settings = await self.optimizer.optimize_request(content)
+             conv["optimizer_settings"] = optimizer_settings
+             await self._save_conversation(scope_group, conv_id, conv)
+        else:
+             log.debug(f"Using cached optimizer settings: {optimizer_settings}")
+
         # --- Stream Response ---
         try:
             await self.stream_response(
@@ -251,6 +267,7 @@ class ChatService:
                 target_channel=response_target,
                 save_to_conv=(scope_group, conv_id, unique_key),
                 billing_guild=billing_guild,
+                **optimizer_settings,
             )
         except Exception as e:
             log.exception("Failed to stream response")
@@ -298,6 +315,7 @@ class ChatService:
         target_channel=None,
         save_to_conv=None,
         billing_guild: discord.Guild = None,
+        **kwargs,
     ):
         """Stream the AI response and update Discord message."""
         dest = target_channel if target_channel else (ctx.channel if ctx else None)
@@ -310,7 +328,7 @@ class ChatService:
             accumulated_parts = []
             last_update = time.time()
 
-            stream = self.client.stream_chat(model, messages)
+            stream = self.client.stream_chat(model, messages, **kwargs)
 
             async for item in stream:
                 if isinstance(item, TokenUsage):
