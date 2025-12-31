@@ -163,6 +163,14 @@ class IChatService(Protocol):
         """Send a long message to Discord, splitting if necessary."""
         ...
 
+    async def add_message_to_conversation(
+        self, scope_group: Any, conv_id: str, unique_key: str, role: str, content: Any
+    ) -> None: ...
+
+    async def get_conversation_messages(
+        self, scope_group: Any, conv_id: str, unique_key: str
+    ) -> list[dict[str, str]]: ...
+
 
 @runtime_checkable
 class IContextService(Protocol):
@@ -182,6 +190,7 @@ class ISummarizerService(Protocol):
         user_id: int,
         model: str,
         billing_guild: Any = None,
+        language: str | None = None,
     ) -> AsyncIterator[str]:
         """Generate a summary, yielding progress updates and final result."""
         ...
@@ -204,6 +213,13 @@ class IPoeHub(Protocol):
     async def _build_model_select_options(
         self, query: str | None = None
     ) -> list[Any]: ...
+    async def run_summary_pipeline(
+        self,
+        ctx: Any,
+        channel: Any,
+        hours: float,
+        language: str | None = None,
+    ) -> None: ...
     async def _build_config_embed(
         self, ctx: Any, owner_mode: bool, dummy_state: bool, lang: str
     ) -> Any: ...

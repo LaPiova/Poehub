@@ -249,6 +249,7 @@ class OpenAIProvider(BaseLLMClient):
         self,
         model: str,
         messages: list[dict[str, Any]],
+        **kwargs,
     ) -> AsyncGenerator[str | TokenUsage, None]:
         ctx = RequestContext(model=model, message_count=len(messages))
         ctx.info("Starting chat request")
@@ -259,6 +260,17 @@ class OpenAIProvider(BaseLLMClient):
             "stream": True,
             "timeout": 90.0,
         }
+
+        extra_body = {}
+        if "web_search_override" in kwargs:
+             extra_body["web_search"] = kwargs["web_search_override"]
+        if "thinking_level" in kwargs:
+             extra_body["thinking_level"] = kwargs["thinking_level"]
+        if "quality" in kwargs:
+             extra_body["quality"] = kwargs["quality"]
+
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
 
         # Check support for stream_options
         if "deepseek" not in str(self.client.base_url):

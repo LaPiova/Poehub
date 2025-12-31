@@ -164,8 +164,9 @@ async def test_helper_methods_missing_manager(cog):
     assert await cog._delete_conversation(123, "c1") is False
     with pytest.raises(RuntimeError):
         await cog._get_or_create_conversation(123, "c1")
-    await cog._add_message_to_conversation(123, "c1", "user", "msg")
-    assert await cog._get_conversation_messages(123, "c1") == []
+    # _add_message_to_conversation and _get_conversation_messages were removed
+    # await cog._add_message_to_conversation(123, "c1", "user", "msg")
+    # assert await cog._get_conversation_messages(123, "c1") == []
 
     ctx = AsyncMock()
     ctx.author.id = 123

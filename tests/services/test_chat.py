@@ -134,7 +134,7 @@ class TestChatService:
         with patch.object(service, "stream_response", new_callable=AsyncMock) as mock_stream:
             with patch.object(service, "_resolve_quote_context", new_callable=AsyncMock, return_value=""):
                 with patch.object(service, "_extract_image_urls", return_value=[]):
-                    with patch.object(service, "_add_message_to_conversation", new_callable=AsyncMock):
+                    with patch.object(service, "add_message_to_conversation", new_callable=AsyncMock):
                         with patch.object(service, "_determine_response_target", new_callable=AsyncMock):
                             message = AsyncMock(spec=discord.Message)
                             message.channel = AsyncMock(spec=discord.TextChannel)
@@ -214,7 +214,7 @@ class TestChatService:
         # Mock time to simulate passage of 2+ seconds between chunks
         with patch("poehub.services.chat.time.time", side_effect=[100, 103, 106, 110]):
             # Initial time, loop 1 time, loop 2 time (trigger update), final
-            with patch.object(service, "_add_message_to_conversation", new_callable=AsyncMock) as mock_add:
+            with patch.object(service, "add_message_to_conversation", new_callable=AsyncMock) as mock_add:
                 await service.stream_response(
                     ctx=None,
                     messages=[],

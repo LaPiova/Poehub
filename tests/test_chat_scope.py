@@ -72,6 +72,10 @@ def mock_services(mock_config):
     chat_service.client.format_image_message = lambda content, urls: content
     chat_service.stream_response = AsyncMock()
 
+    # Mock optimizer
+    chat_service.optimizer = MagicMock()
+    chat_service.optimizer.optimize_request = AsyncMock(return_value={})
+
     # Billing mocks
     billing.resolve_billing_guild = AsyncMock(return_value=MagicMock())
     billing.check_budget = AsyncMock(return_value=True)

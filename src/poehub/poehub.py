@@ -20,7 +20,7 @@ import discord
 from discord.ext import tasks
 from redbot.core import Config
 from redbot.core import commands as red_commands
-from redbot.core.bot import Red
+from redbot.core.bot import Red, app_commands
 
 from .core.encryption import EncryptionHelper, generate_key
 from .core.i18n import LANG_EN, LANG_LABELS, LANG_ZH_TW, tr
@@ -336,33 +336,7 @@ class PoeHub(red_commands.Cog):
 
         return conv
 
-    async def _add_message_to_conversation(
-        self,
-        user_id: int,
-        conv_id: str,
-        role: str,
-        content: str | list[dict[str, Any]],
-    ) -> None:
-        """Add a message to a conversation."""
-        if not self.conversation_manager:
-            return
 
-        conv = await self._get_or_create_conversation(user_id, conv_id)
-
-        # Update using manager logic
-        updated_conv = self.conversation_manager.add_message(conv, role, content)
-
-        await self._save_conversation(user_id, conv_id, updated_conv)
-
-    async def _get_conversation_messages(
-        self, user_id: int, conv_id: str
-    ) -> list[dict[str, str]]:
-        """Get messages for API call"""
-        if not self.conversation_manager:
-            return []
-
-        conv = await self._get_conversation(user_id, conv_id)
-        return self.conversation_manager.get_api_messages(conv)
 
     async def _get_language(self, user_id: int) -> str:
         """Get the user's preferred language."""
@@ -1535,6 +1509,181 @@ class PoeHub(red_commands.Cog):
         await ctx.send(embed=embed)
 
 
+    async def run_summary_pipeline(
+        self,
+        ctx: red_commands.Context | Any,
+        channel: discord.TextChannel | Any,
+        hours: float,
+        language: str | None = None,
+        interaction: discord.Interaction | None = None,
+    ) -> None:
+        """Run the summary pipeline (shared logic)."""
+        # 1. Initial response
+        # If we have an interaction, we use its followup or edit capability
+        initial_msg = None
+
+        if interaction and not interaction.response.is_done():
+             # Should not happen if deferred properly, but just in case
+             await interaction.response.send_message(f"🔄 Scanning messages from last {hours}h...", ephemeral=False)
+             initial_msg = await interaction.original_response()
+        elif interaction:
+             # Already deferred, use webhook to send followup or edit original if deferred with 'thinking'
+             # If deferred with thinking=True, we can edit the original response
+             try:
+                 initial_msg = await interaction.original_response()
+                 await initial_msg.edit(content=f"🔄 Scanning messages from last {hours}h...")
+             except Exception:
+                 # Fallback
+                 initial_msg = await interaction.followup.send(f"🔄 Scanning messages from last {hours}h...", wait=True)
+        else:
+             initial_msg = await channel.send(f"🔄 Scanning messages from last {hours}h...")
+
+        try:
+            # 2. Fetch Messages
+            # Ensure we use UTC aware datetime
+            from datetime import UTC, datetime, timedelta
+
+            from .models import MessageData
+
+            now = datetime.now(UTC)
+            after_time = now - timedelta(hours=hours)
+
+            messages: list[MessageData] = []
+
+            async for message in channel.history(limit=None, after=after_time, oldest_first=True):
+                 if message.author.bot:
+                     continue
+                 if not message.content:
+                     continue
+
+                 messages.append(
+                     MessageData(
+                         author=message.author.display_name,
+                         content=message.content,
+                         timestamp=message.created_at.strftime("%Y-%m-%d %H:%M"),
+                     )
+                 )
+
+            if not messages:
+                return await initial_msg.edit(content="❌ No messages found in time range.")
+
+            message_count = len(messages)
+            await initial_msg.edit(content=f"📝 Found {message_count} messages. Starting summary...")
+
+            # 3. Resolve Language
+            if language:
+                user_lang_name = language
+            else:
+                user_id = ctx.author.id if hasattr(ctx, "author") else ctx.user.id
+                user_lang_code = await self.context_service.get_user_language(user_id)
+                from .core.i18n import LANG_LABELS
+                user_lang_name = LANG_LABELS.get(user_lang_code, "English")
+
+            # 4. Resolve Model
+            # use ctx.author or ctx.user
+            user_obj = ctx.author if hasattr(ctx, "author") else ctx.user
+            user_model = await self.config.user(user_obj).model()
+
+            if not self.summarizer:
+                 return await initial_msg.edit(content="❌ Summarizer service not available.")
+
+            # 5. Run Service
+            final_text = ""
+            guild_obj = ctx.guild # works for both Context and Interaction (usually)
+
+            async for update in self.summarizer.summarize_messages(
+                messages,
+                user_obj.id,
+                model=user_model,
+                billing_guild=guild_obj,
+                language=user_lang_name
+            ):
+                if update.startswith("RESULT: "):
+                    final_text = update[8:]
+                elif update.startswith("STATUS: "):
+                    try:
+                        await initial_msg.edit(content=f"📝 {update[8:]}")
+                    except discord.HTTPException:
+                        pass
+
+            if not final_text:
+                return await initial_msg.edit(content="❌ Summary generation failed (no result).")
+
+            # 6. Create Thread & Reply
+            try:
+                # thread_name_key = "SUMMARY_THREAD_NAME" # We might want to localize this too eventually
+                thread_name = f"Summary: Last {hours}h"
+
+                thread = await initial_msg.create_thread(
+                    name=thread_name, auto_archive_duration=60
+                )
+
+                # Sleep to propagate
+                import asyncio
+                await asyncio.sleep(0.5)
+
+                target = thread
+
+                # --- Thread History Initialization ---
+                # We need to set the model for this new thread context so replies use it.
+                if self.chat_service:
+                    scope_group = self.config.channel(target)
+                    conv_id = "default"
+                    unique_key = f"channel:{target.id}:{conv_id}" # Redbot config key style
+
+                    # 1. Initialize Conversation Data
+                    conv_data = {"id": conv_id, "messages": [], "model": user_model}
+                    conversations = await scope_group.conversations()
+
+                    if conv_id not in conversations:
+                        if self.conversation_manager:
+                             conversations[conv_id] = self.conversation_manager.prepare_for_storage(conv_data)
+                        else:
+                             conversations[conv_id] = conv_data
+                        await scope_group.conversations.set(conversations)
+
+                    # 2. Add Trigger Message (User)
+                    trigger_text = f"Summarize messages from last {hours} hours."
+                    await self.chat_service.add_message_to_conversation(
+                        scope_group, conv_id, unique_key, "user", trigger_text
+                    )
+
+                    # 3. Add Summary (Assistant)
+                    await self.chat_service.add_message_to_conversation(
+                        scope_group, conv_id, unique_key, "assistant", final_text
+                    )
+
+            except discord.Forbidden:
+                # Fallback if cannot create thread
+                target = channel
+
+            # Send the final long message
+            await self.chat_service.send_split_message(target, final_text)
+
+            await initial_msg.edit(
+                content=f"✅ Summary generated for {message_count} messages."
+            )
+
+        except Exception as e:
+            log.error("Summary pipeline error", exc_info=True)
+            await initial_msg.edit(content=f"❌ Error: {str(e)}")
+
+
+    @red_commands.hybrid_command(name="summary", description="Summarize recent messages.")
+    @app_commands.describe(
+        hours="Number of hours to look back (default 1)",
+        language="Language for the summary (optional)"
+    )
+    async def summary(self, ctx: red_commands.Context, hours: float = 1.0, language: str = None):
+        """Summarize recent messages in this channel."""
+        if not ctx.guild:
+            return await ctx.send("This command can only be used in a server.")
+
+        # Defer if interaction
+        if ctx.interaction:
+            await ctx.interaction.response.defer(thinking=True)
+
+        await self.run_summary_pipeline(ctx, ctx.channel, hours, language, interaction=ctx.interaction)
 async def setup(bot: Red):
     """Setup function for Red-DiscordBot"""
     await bot.add_cog(PoeHub(bot))
