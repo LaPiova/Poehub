@@ -258,6 +258,11 @@ class OpenAIProvider(BaseLLMClient):
             "messages": messages,
             "stream": True,
             "timeout": 90.0,
+            "extra_body": {
+                "web_search": True,
+                "thinking_level": "high",
+                "quality": "high",
+            },
         }
 
         # Check support for stream_options

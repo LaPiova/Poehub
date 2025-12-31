@@ -126,6 +126,13 @@ class TestOpenAIProvider:
             else:
                 usage = item
 
+        # Verify extra_body parameters
+        call_kwargs = provider.client.chat.completions.create.call_args.kwargs
+        assert "extra_body" in call_kwargs
+        assert call_kwargs["extra_body"]["web_search"] is True
+        assert call_kwargs["extra_body"]["thinking_level"] == "high"
+        assert call_kwargs["extra_body"]["quality"] == "high"
+
         assert chunks == ["Hello"]
         assert usage.currency == "USD"
         assert usage.input_tokens == 5
