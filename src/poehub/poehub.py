@@ -801,6 +801,64 @@ class PoeHub(red_commands.Cog):
         model = await self.config.user(ctx.author).model()
         await ctx.send(f"🤖 Your current model: **{model}**")
 
+    @red_commands.hybrid_command(name="websearch")
+    async def web_search(self, ctx: red_commands.Context, state: bool):
+        """
+        Enable or disable web search for the current conversation.
+        Usage: [p]websearch True/False (or On/Off)
+        """
+        # Determine context scope
+        is_dm = isinstance(ctx.channel, discord.DMChannel)
+
+        if is_dm:
+            # User scope
+            user_id = ctx.author.id
+            conv_id = await self.context_service.get_active_conversation_id(user_id)
+            conv = await self._get_or_create_conversation(user_id, conv_id)
+            scope_desc = "DM"
+        else:
+            # Channel/Thread scope
+            # Note: We need to use the channel ID as scope group logic in chat service uses config.channel(target)
+            # But here we are in the main cog. The helper _get_conversation uses USER ID by default.
+            # We need to manually handle channel scope here or add a helper.
+            # Let's inspect _get_conversation... it takes user_id.
+            # We need a channel equivalent.
+
+            # Direct config access for channel/thread
+            scope_group = self.config.channel(ctx.channel)
+            conversations = await scope_group.conversations()
+            conv_id = "default"
+
+            if conv_id in conversations:
+                 conv = self.conversation_manager.process_conversation_data(conversations[conv_id])
+            else:
+                 conv = self.conversation_manager.create_conversation(conv_id)
+
+            scope_desc = "Channel/Thread"
+
+        if not conv:
+             await ctx.send("❌ Could not retrieve conversation data.")
+             return
+
+        # Update setting
+        # We store it in optimizer_settings which ChatService reads
+        if "optimizer_settings" not in conv or conv["optimizer_settings"] is None:
+            conv["optimizer_settings"] = {}
+
+        conv["optimizer_settings"]["web_search_override"] = state
+
+        # Save back
+        if is_dm:
+            await self._save_conversation(ctx.author.id, conv_id, conv)
+        else:
+            # Manual save for channel since _save_conversation is user-centric
+            conversations = await self.config.channel(ctx.channel).conversations()
+            conversations[conv_id] = self.conversation_manager.prepare_for_storage(conv)
+            await self.config.channel(ctx.channel).conversations.set(conversations)
+
+        status_text = "Enabled" if state else "Disabled"
+        await ctx.send(f"✅ Web Search **{status_text}** for this {scope_desc} conversation.")
+
     @red_commands.hybrid_command(name="threadmodel", aliases=["tmodel"])
     async def thread_model(self, ctx: red_commands.Context, *, model_name: str):
         """
