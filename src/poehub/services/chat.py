@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -338,6 +339,18 @@ class ChatService:
                             billing_guild, item.cost, currency=item.currency
                         )
                     continue
+
+                # --- Detect Stream Restart (e.g. Web Scroll -> Final Answer) ---
+                # When using web search, Poe might output "Thinking..." again for the final answer.
+                # If we don't clear the buffer, we get valid output + separator + duplicate output.
+                pattern = r"(\*\*|__)?Thinking\.{3}"
+                match = re.search(pattern, item)
+                if match and len(accumulated_parts) > 0:
+                     log.info("Detected stream restart (Thinking...), clearing buffer.")
+                     accumulated_parts = []
+                     # We keep from the match onwards
+                     start_index = match.start()
+                     item = item[start_index:].lstrip()
 
                 accumulated_parts.append(item)
 

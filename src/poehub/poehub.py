@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 from datetime import datetime
 from typing import Any
 
@@ -129,6 +130,9 @@ class PoeHub(red_commands.Cog):
         self.conversation_manager: ConversationStorageService | None = None
         self.encryption: EncryptionHelper | None = None
         self.billing: BillingService | None = None
+
+        # Idempotency
+        self._processed_messages = deque(maxlen=50)
 
         # Initialize encryption on load
         asyncio.create_task(self._initialize())
@@ -1340,6 +1344,11 @@ class PoeHub(red_commands.Cog):
 
         # 1. Listen for DM messages
         is_dm = isinstance(message.channel, discord.DMChannel)
+
+        # Idempotency check
+        if message.id in self._processed_messages:
+            return
+        self._processed_messages.append(message.id)
 
         # 2. Listen for mentions in Guilds
         # We check if the bot is actually mentioned in the message text or reply
