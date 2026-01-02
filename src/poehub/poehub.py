@@ -31,6 +31,7 @@ from .services.billing.oracle import PricingOracle
 from .services.chat import ChatService
 from .services.context import ContextService
 from .services.conversation.storage import ConversationStorageService
+from .services.music import MusicService
 from .services.summarizer import SummarizerService
 from .ui.config_view import PoeConfigView
 from .ui.conversation_view import ConversationMenuView
@@ -130,6 +131,7 @@ class PoeHub(red_commands.Cog):
         self.conversation_manager: ConversationStorageService | None = None
         self.encryption: EncryptionHelper | None = None
         self.billing: BillingService | None = None
+        self.music_service: MusicService = MusicService()
 
         # Idempotency
         self._processed_messages = deque(maxlen=50)
@@ -1751,6 +1753,248 @@ class PoeHub(red_commands.Cog):
             await ctx.interaction.response.defer(thinking=True)
 
         await self.run_summary_pipeline(ctx, ctx.channel, hours, language, interaction=ctx.interaction)
+
+    # --- Voice Channel Commands ---
+
+    @red_commands.hybrid_command(name="join")
+    @red_commands.guild_only()
+    async def join_voice(self, ctx: red_commands.Context):
+        """Join the voice channel you are currently in."""
+        if not ctx.author.voice or not ctx.author.voice.channel:
+            await ctx.send("❌ You are not in a voice channel.")
+            return
+
+        channel = ctx.author.voice.channel
+
+        if ctx.voice_client:
+            if ctx.voice_client.channel.id == channel.id:
+                await ctx.send(f"✅ Already connected to **{channel.name}**")
+                return
+            await ctx.voice_client.move_to(channel)
+        else:
+            await channel.connect()
+
+        await ctx.send(f"✅ Joined **{channel.name}**")
+
+    @red_commands.hybrid_command(name="vcleave")
+    @red_commands.guild_only()
+    async def leave_voice(self, ctx: red_commands.Context):
+        """Leave the current voice channel."""
+        if not ctx.voice_client:
+            await ctx.send("❌ I'm not connected to any voice channel.")
+            return
+
+        channel_name = ctx.voice_client.channel.name
+        self.music_service.clear_queue(ctx.guild.id)
+        await ctx.voice_client.disconnect()
+        await ctx.send(f"👋 Left **{channel_name}**")
+
+    # --- Music Commands ---
+
+    @red_commands.hybrid_group(name="music", fallback="help")
+    @red_commands.guild_only()
+    async def music_group(self, ctx: red_commands.Context):
+        """Music commands - search, add, play, skip, stop, queue."""
+        embed = discord.Embed(
+            title="🎵 Music Commands",
+            description=(
+                "`/music search <query>` - Search for songs\n"
+                "`/music add <index>` - Add song to queue\n"
+                "`/music play <index>` - Force play a song\n"
+                "`/music skip` - Skip current song\n"
+                "`/music stop` - Stop playback\n"
+                "`/music queue` - View queue"
+            ),
+            color=discord.Color.purple(),
+        )
+        await ctx.send(embed=embed, ephemeral=True)
+
+    @music_group.command(name="search")
+    @app_commands.describe(query="Song name or artist to search for")
+    async def music_search(self, ctx: red_commands.Context, *, query: str):
+        """Search for songs."""
+        await ctx.defer()
+        results = await self.music_service.search(query, limit=10)
+
+        if not results:
+            await ctx.send("❌ No results found.", ephemeral=True)
+            return
+
+        self.music_service.cache_search_results(ctx.author.id, results)
+
+        embed = discord.Embed(
+            title=f"🔍 Search: {query}",
+            color=discord.Color.blue(),
+        )
+        lines = []
+        for i, song in enumerate(results[:10], 1):
+            lines.append(f"`{i}.` **{song['name']}** - {song['artist']} ({song['platform']})")
+        embed.description = "\n".join(lines)
+        embed.set_footer(text="Use /music add <number> or /music play <number>")
+
+        await ctx.send(embed=embed, ephemeral=True)
+
+    @music_group.command(name="add")
+    @app_commands.describe(index="Song number from search results")
+    async def music_add(self, ctx: red_commands.Context, index: int):
+        """Add a song to the queue. Auto-plays if queue was empty."""
+        song = self.music_service.get_cached_result(ctx.author.id, index)
+        if not song:
+            await ctx.send("❌ Invalid index. Search first with `/music search`.", ephemeral=True)
+            return
+
+        # Check if queue was empty before adding
+        queue_was_empty = len(self.music_service.get_queue(ctx.guild.id)) == 0
+        not_playing = self.music_service.get_now_playing(ctx.guild.id) is None
+
+        position = self.music_service.add_to_queue(ctx.guild.id, song)
+
+        # Auto-play if queue was empty and we're in a voice channel
+        if queue_was_empty and not_playing and ctx.voice_client and not ctx.voice_client.is_playing():
+            await ctx.defer(ephemeral=True)
+            next_song = await self.music_service.play_next(
+                ctx.voice_client,
+                self._create_after_callback(ctx.guild.id, ctx.voice_client)
+            )
+            if next_song:
+                await ctx.send(f"🎵 Now playing: **{next_song['name']}** - {next_song['artist']}", ephemeral=True)
+                return
+
+        await ctx.send(f"✅ Added **{song['name']}** to queue (position {position})", ephemeral=True)
+
+    def _create_after_callback(self, guild_id: int, voice_client: discord.VoiceClient):
+        """Create a callback for when a song finishes."""
+        def after_callback(error):
+            if error:
+                log.error(f"Playback error: {error}")
+            # Schedule next song
+            asyncio.run_coroutine_threadsafe(
+                self._play_next_song(guild_id, voice_client),
+                self.bot.loop
+            )
+        return after_callback
+
+    async def _play_next_song(self, guild_id: int, voice_client: discord.VoiceClient):
+        """Play the next song in the queue."""
+        if not voice_client.is_connected():
+            return
+        song = await self.music_service.play_next(
+            voice_client,
+            self._create_after_callback(guild_id, voice_client)
+        )
+        if song:
+            channel = voice_client.channel
+            if channel:
+                try:
+                    # Find a text channel to send the now playing message
+                    for text_channel in voice_client.guild.text_channels:
+                        if text_channel.permissions_for(voice_client.guild.me).send_messages:
+                            await text_channel.send(f"🎵 Now playing: **{song['name']}** - {song['artist']}")
+                            break
+                except Exception:
+                    pass
+
+    @music_group.command(name="play")
+    @app_commands.describe(index="Song number from search results")
+    async def music_play(self, ctx: red_commands.Context, index: int):
+        """Force play a song (removes current, keeps queue)."""
+        if not ctx.voice_client:
+            await ctx.send("❌ I'm not in a voice channel. Use `/join` first.", ephemeral=True)
+            return
+
+        song = self.music_service.get_cached_result(ctx.author.id, index)
+        if not song:
+            await ctx.send("❌ Invalid index. Search first with `/music search`.", ephemeral=True)
+            return
+
+        await ctx.defer()
+        success = await self.music_service.play_song(
+            ctx.voice_client,
+            song,
+            self._create_after_callback(ctx.guild.id, ctx.voice_client)
+        )
+
+        if success:
+            await ctx.send(f"🎵 Now playing: **{song['name']}** - {song['artist']}", ephemeral=True)
+        else:
+            await ctx.send("❌ Failed to play the song.", ephemeral=True)
+
+    @music_group.command(name="skip")
+    async def music_skip(self, ctx: red_commands.Context):
+        """Skip to the next song."""
+        if not ctx.voice_client:
+            await ctx.send("❌ I'm not in a voice channel.", ephemeral=True)
+            return
+
+        if self.music_service.skip(ctx.voice_client):
+            await ctx.send("⏭️ Skipped!", ephemeral=True)
+        else:
+            await ctx.send("❌ Nothing is playing.", ephemeral=True)
+
+    @music_group.command(name="stop")
+    async def music_stop(self, ctx: red_commands.Context):
+        """Stop playback and clear the queue."""
+        if not ctx.voice_client:
+            await ctx.send("❌ I'm not in a voice channel.", ephemeral=True)
+            return
+
+        self.music_service.clear_queue(ctx.guild.id)
+        if ctx.voice_client.is_playing():
+            ctx.voice_client.stop()
+
+        await ctx.send("⏹️ Stopped playback and cleared queue.", ephemeral=True)
+
+    @music_group.command(name="queue")
+    async def music_queue(self, ctx: red_commands.Context):
+        """View the current queue."""
+        queue = self.music_service.get_queue(ctx.guild.id)
+        now_playing = self.music_service.get_now_playing(ctx.guild.id)
+
+        embed = discord.Embed(title="🎵 Music Queue", color=discord.Color.purple())
+
+        if now_playing:
+            embed.add_field(
+                name="Now Playing",
+                value=f"**{now_playing['name']}** - {now_playing['artist']}",
+                inline=False
+            )
+
+        if queue:
+            lines = []
+            for i, song in enumerate(queue[:10], 1):
+                lines.append(f"`{i}.` **{song['name']}** - {song['artist']}")
+            if len(queue) > 10:
+                lines.append(f"... and {len(queue) - 10} more")
+            embed.add_field(name="Up Next", value="\n".join(lines), inline=False)
+        elif not now_playing:
+            embed.description = "Queue is empty. Use `/music search` to find songs!"
+
+        await ctx.send(embed=embed, ephemeral=True)
+
+    @music_group.command(name="volume")
+    @app_commands.describe(level="Volume level (0-100)")
+    async def music_volume(self, ctx: red_commands.Context, level: int = None):
+        """Set or view the volume (0-100)."""
+        if level is None:
+            # Show current volume
+            current = int(self.music_service.get_volume(ctx.guild.id) * 100)
+            await ctx.send(f"🔊 Current volume: **{current}%**", ephemeral=True)
+            return
+
+        if level < 0 or level > 100:
+            await ctx.send("❌ Volume must be between 0 and 100.", ephemeral=True)
+            return
+
+        normalized = self.music_service.set_volume(ctx.guild.id, level)
+
+        # Update current source if playing
+        if ctx.voice_client and ctx.voice_client.source:
+            if hasattr(ctx.voice_client.source, 'volume'):
+                ctx.voice_client.source.volume = normalized
+
+        await ctx.send(f"🔊 Volume set to **{level}%**", ephemeral=True)
+
+
 async def setup(bot: Red):
     """Setup function for Red-DiscordBot"""
     await bot.add_cog(PoeHub(bot))
