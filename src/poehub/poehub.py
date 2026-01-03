@@ -1813,11 +1813,15 @@ class PoeHub(red_commands.Cog):
         await ctx.send(embed=embed, ephemeral=True)
 
     @music_group.command(name="search")
-    @app_commands.describe(query="Song name or artist to search for")
-    async def music_search(self, ctx: red_commands.Context, *, query: str):
+    @app_commands.describe(
+        query="Song name or artist to search for",
+        count="Number of results to show (1-20, default 10)"
+    )
+    async def music_search(self, ctx: red_commands.Context, count: int = 10, *, query: str):
         """Search for songs."""
+        count = max(1, min(20, count))  # Clamp to 1-20
         await ctx.defer(ephemeral=True)
-        results = await self.music_service.search(query, limit=10)
+        results = await self.music_service.search(query, limit=count)
 
         if not results:
             await ctx.send("❌ No results found.", ephemeral=True)
@@ -1830,7 +1834,7 @@ class PoeHub(red_commands.Cog):
             color=discord.Color.blue(),
         )
         lines = []
-        for i, song in enumerate(results[:10], 1):
+        for i, song in enumerate(results[:count], 1):
             lines.append(f"`{i}.` **{song['name']}** - {song['artist']} ({song['platform']})")
         embed.description = "\n".join(lines)
         embed.set_footer(text="Use /music add <number> or /music play <number>")
