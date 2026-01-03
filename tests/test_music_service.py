@@ -160,22 +160,31 @@ def test_clear_queue(music_service):
     assert music_service.get_now_playing(100) is None
 
 
-def test_pop_next(music_service):
-    """Test popping next song from queue."""
+def test_get_next(music_service):
+    """Test getting next song from queue (loops)."""
     song1 = {"id": "1"}
     song2 = {"id": "2"}
     music_service.add_to_queue(100, song1)
     music_service.add_to_queue(100, song2)
 
-    popped = music_service.pop_next(100)
+    # First call gets song1
+    next1 = music_service.get_next(100)
+    assert next1 == song1
+    # Queue is unchanged
+    assert music_service.get_queue(100) == [song1, song2]
 
-    assert popped == song1
-    assert music_service.get_queue(100) == [song2]
+    # Second call gets song2
+    next2 = music_service.get_next(100)
+    assert next2 == song2
+
+    # Third call loops back to song1
+    next3 = music_service.get_next(100)
+    assert next3 == song1
 
 
-def test_pop_next_empty(music_service):
-    """Test popping from empty queue."""
-    assert music_service.pop_next(999) is None
+def test_get_next_empty(music_service):
+    """Test getting next from empty queue."""
+    assert music_service.get_next(999) is None
 
 
 # --- Now Playing Tests ---

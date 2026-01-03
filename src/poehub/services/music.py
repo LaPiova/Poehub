@@ -24,6 +24,7 @@ class MusicService:
         self._last_search: dict[int, list[dict]] = {}  # user_id -> search results
         self._now_playing: dict[int, dict | None] = {}  # guild_id -> current song
         self._volumes: dict[int, float] = {}  # guild_id -> volume (0.0-1.0)
+        self._queue_positions: dict[int, int] = {}  # guild_id -> current position in queue
 
     # --- Search API ---
 
@@ -105,13 +106,25 @@ class MusicService:
         """Clear the queue for a guild."""
         self._queues[guild_id] = []
         self._now_playing[guild_id] = None
+        self._queue_positions[guild_id] = 0
 
-    def pop_next(self, guild_id: int) -> dict | None:
-        """Pop the next song from the queue."""
+    def get_next(self, guild_id: int) -> dict | None:
+        """Get the next song from the queue (loops back to start)."""
         queue = self._queues.get(guild_id, [])
-        if queue:
-            return queue.pop(0)
-        return None
+        if not queue:
+            return None
+        
+        pos = self._queue_positions.get(guild_id, 0)
+        if pos >= len(queue):
+            pos = 0  # Loop back to start
+        
+        song = queue[pos]
+        self._queue_positions[guild_id] = pos + 1
+        return song
+
+    def get_queue_position(self, guild_id: int) -> int:
+        """Get current position in queue (1-based for display)."""
+        return self._queue_positions.get(guild_id, 0)
 
     def get_now_playing(self, guild_id: int) -> dict | None:
         """Get the currently playing song."""
@@ -187,7 +200,7 @@ class MusicService:
         Returns the song that started playing, or None if queue is empty.
         """
         guild_id = voice_client.guild.id
-        song = self.pop_next(guild_id)
+        song = self.get_next(guild_id)
 
         if song:
             success = await self.play_song(voice_client, song, after_callback)

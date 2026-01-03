@@ -1794,7 +1794,7 @@ class PoeHub(red_commands.Cog):
     @red_commands.hybrid_group(name="music", fallback="help")
     @red_commands.guild_only()
     async def music_group(self, ctx: red_commands.Context):
-        """Music commands - search, add, play, skip, stop, queue."""
+        """Music commands - search, add, play, skip, stop, queue, clear."""
         embed = discord.Embed(
             title="🎵 Music Commands",
             description=(
@@ -1803,7 +1803,10 @@ class PoeHub(red_commands.Cog):
                 "`/music play <index>` - Force play a song\n"
                 "`/music skip` - Skip current song\n"
                 "`/music stop` - Stop playback\n"
-                "`/music queue` - View queue"
+                "`/music queue` - View queue\n"
+                "`/music clear` - Clear the queue\n"
+                "`/music volume [0-100]` - Set volume\n"
+                "\n🔁 *Queue loops automatically*"
             ),
             color=discord.Color.purple(),
         )
@@ -1813,7 +1816,7 @@ class PoeHub(red_commands.Cog):
     @app_commands.describe(query="Song name or artist to search for")
     async def music_search(self, ctx: red_commands.Context, *, query: str):
         """Search for songs."""
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         results = await self.music_service.search(query, limit=10)
 
         if not results:
@@ -1878,21 +1881,10 @@ class PoeHub(red_commands.Cog):
         """Play the next song in the queue."""
         if not voice_client.is_connected():
             return
-        song = await self.music_service.play_next(
+        await self.music_service.play_next(
             voice_client,
             self._create_after_callback(guild_id, voice_client)
         )
-        if song:
-            channel = voice_client.channel
-            if channel:
-                try:
-                    # Find a text channel to send the now playing message
-                    for text_channel in voice_client.guild.text_channels:
-                        if text_channel.permissions_for(voice_client.guild.me).send_messages:
-                            await text_channel.send(f"🎵 Now playing: **{song['name']}** - {song['artist']}")
-                            break
-                except Exception:
-                    pass
 
     @music_group.command(name="play")
     @app_commands.describe(index="Song number from search results")
@@ -1907,7 +1899,7 @@ class PoeHub(red_commands.Cog):
             await ctx.send("❌ Invalid index. Search first with `/music search`.", ephemeral=True)
             return
 
-        await ctx.defer()
+        await ctx.defer(ephemeral=True)
         success = await self.music_service.play_song(
             ctx.voice_client,
             song,
@@ -1993,6 +1985,13 @@ class PoeHub(red_commands.Cog):
                 ctx.voice_client.source.volume = normalized
 
         await ctx.send(f"🔊 Volume set to **{level}%**", ephemeral=True)
+
+    @music_group.command(name="clear")
+    async def music_clear(self, ctx: red_commands.Context):
+        """Clear the queue (keeps current song playing)."""
+        queue_len = len(self.music_service.get_queue(ctx.guild.id))
+        self.music_service.clear_queue(ctx.guild.id)
+        await ctx.send(f"🗑️ Cleared {queue_len} songs from the queue.", ephemeral=True)
 
 
 async def setup(bot: Red):
