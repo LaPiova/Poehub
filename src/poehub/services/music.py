@@ -47,7 +47,9 @@ class MusicService:
                 data = response.json()
 
                 if data.get("code") == 200:
-                    return data.get("data", {}).get("results", [])
+                    results = data.get("data", {}).get("results", [])
+                    # Filter out QQ platform results
+                    return [r for r in results if r.get("platform") != "qq"]
                 return []
         except Exception as e:
             log.error(f"Search failed: {e}")
