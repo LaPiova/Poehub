@@ -413,6 +413,7 @@ sudo systemctl status ${POEHUB_SERVICE_NAME:-poebot}.service
 - anthropic 0.3.0+
 - google-generativeai 0.3.0+
 - cryptography 41.0.0+
+- **ffmpeg** (required for voice/music features: `apt install ffmpeg`)
 
 ## License
 
